@@ -1,0 +1,30 @@
+# Python virtual environment
+venv/
+__pycache__/
+*.pyc
+
+# Data files (these are large and regenerated)
+data/
+*.db
+*.parquet
+*.json
+
+# Logs
+logs/
+
+# Environment variables (contains secrets!)
+.env
+
+# IDE settings
+.vscode/
+.idea/
+*.swp
+
+# MacOS
+.DS_Store
+
+# Windows
+Thumbs.db
+
+# Power BI (optional: include this if you want to share the dashboard file)
+# crypto_dash.pbix

@@ -219,6 +219,32 @@ crypto-pipeline/
 
 ---
 
+## 🧠 Lessons Learned: UPSERT Logic
+
+### The Problem
+Early versions of this pipeline used `INSERT` only, causing duplicate rows for the same symbol and timestamp. This broke time-series analysis and inflated record counts.
+
+### The Solution
+**UPSERT (UPDATE + INSERT)** logic was implemented:
+- If a record with `(symbol_id, record_timestamp)` exists → **UPDATE** it
+- If it doesn't exist → **INSERT** a new record
+- A `UNIQUE(symbol_id, record_timestamp)` constraint prevents duplicates at the database level
+
+### What This Teaches
+Data engineers must always consider **idempotency** – running the same pipeline multiple times should produce the same result. UPSERT ensures your pipeline is **idempotent** and production-ready.
+
+
+### 📊 Understanding Financial Metrics
+
+**Why are `daily_return` and `volatility_7d` zero initially?**
+
+These metrics require historical data:
+- **Daily Return** (`daily_return`) – Calculated by comparing today's price to yesterday's. Requires at least 2 days of data.
+- **Volatility** (`volatility_7d`) – Standard deviation of returns over the last 7 days. Requires at least 7 days of data.
+
+**What to expect:** After running the pipeline daily for 7+ days, both metrics will automatically populate with real values. This is a feature, not a bug!
+
+
 ## 📝 Git Workflow (For This Project)
 
 ### Standard Commit Cycle

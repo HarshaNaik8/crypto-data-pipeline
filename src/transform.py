@@ -7,6 +7,7 @@ import numpy as np
 from datetime import datetime, timedelta
 from typing import Optional
 import logging
+from sqlalchemy import create_engine, text
 
 logger = logging.getLogger(__name__)
 
@@ -14,86 +15,119 @@ class DataTransformer:
     """
     Professional data transformer with feature engineering.
     Handles nulls, rolling averages, returns, and volatility.
+    Loads historical data from database for accurate time-series calculations.
     """
     
-    def __init__(self, raw_df: pd.DataFrame):
+    def __init__(self, raw_df: pd.DataFrame, connection_string: str = "sqlite:///crypto_pipeline.db"):
         self.raw_df = raw_df.copy()
         self.cleaned_df = None
         self.enriched_df = None
+        self.connection_string = connection_string
         
     def _validate_data(self) -> bool:
         """Basic data quality checks."""
         if self.raw_df.empty:
             raise ValueError("Raw DataFrame is empty")
         
-        # Check required columns
         required = ['symbol', 'price_usd', 'timestamp']
         missing = [col for col in required if col not in self.raw_df.columns]
         if missing:
             raise ValueError(f"Missing columns: {missing}")
         
-        # Ensure price is positive
         if (self.raw_df['price_usd'] <= 0).any():
             logger.warning("Negative or zero prices found, dropping rows")
             self.raw_df = self.raw_df[self.raw_df['price_usd'] > 0]
         
-        # Convert timestamp to datetime
         self.raw_df['timestamp'] = pd.to_datetime(self.raw_df['timestamp'])
-        
         return True
     
-    def _handle_nulls(self) -> pd.DataFrame:
+    def _load_historical_data(self) -> pd.DataFrame:
         """
-        Forward-fill nulls for price and volume.
-        In production, you'd also interpolate or use last-observation-carried-forward.
+        Load existing historical data from the database.
+        Uses SQLAlchemy properly.
         """
-        df = self.raw_df.copy()
+        import sqlite3
         
-        # Sort by symbol and timestamp
+        try:
+            # Direct SQLite connection - more reliable!
+            conn = sqlite3.connect('crypto_pipeline.db')
+            
+            # Check if table exists
+            cursor = conn.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='fact_market_data'")
+            if not cursor.fetchone():
+                logger.info("No historical data found (fact_market_data table does not exist)")
+                conn.close()
+                return pd.DataFrame()
+            
+            # Query historical data
+            hist_df = pd.read_sql("""
+                SELECT 
+                    f.symbol_id,
+                    d.symbol_code as symbol,
+                    f.price_usd,
+                    f.record_timestamp as timestamp
+                FROM fact_market_data f
+                JOIN dim_symbol d ON f.symbol_id = d.symbol_id
+                ORDER BY f.record_timestamp
+            """, conn)
+            
+            conn.close()
+            
+            if not hist_df.empty:
+                logger.info(f"Loaded {len(hist_df)} historical records from database")
+                hist_df['timestamp'] = pd.to_datetime(hist_df['timestamp'])
+                return hist_df
+            else:
+                logger.info("No historical records found in database")
+                return pd.DataFrame()
+                
+        except Exception as e:
+            logger.warning(f"Could not load historical data: {e}")
+            return pd.DataFrame()
+    
+    def _handle_nulls(self, df: pd.DataFrame) -> pd.DataFrame:
+        """Forward-fill nulls for price and volume."""
+        df = df.copy()
         df = df.sort_values(['symbol', 'timestamp'])
         
-        # For each symbol, forward-fill missing values
-        df[['price_usd', 'market_cap', 'volume_24h']] = df.groupby('symbol')[['price_usd', 'market_cap', 'volume_24h']].ffill()
+        for col in ['price_usd', 'market_cap', 'volume_24h']:
+            if col in df.columns:
+                df[col] = df.groupby('symbol')[col].ffill()
         
-        # Drop any remaining nulls (only at the very beginning of the series)
         df = df.dropna(subset=['price_usd', 'volume_24h'])
-        
         logger.info(f"Null handling complete. Shape: {df.shape}")
         return df
     
     def _calculate_rolling_features(self, df: pd.DataFrame) -> pd.DataFrame:
         """
         Engineer features:
-        - rolling_avg_7d: 7-day moving average of price
+        - rolling_avg_7d: 7-day moving average
         - rolling_avg_30d: 30-day moving average
         - daily_return: percentage change from previous day
-        - volatility: 7-day standard deviation of daily returns
+        - volatility_7d: 7-day standard deviation of daily returns
         """
-        # Since we only have hourly data, we simulate 'days' by grouping by date.
-        # For a real pipeline with daily data, you'd resample. Here we'll use rolling(7) on hourly data.
-        # To make it realistic, we treat each fetch as a new row.
-        
+        df = df.copy()
         df = df.sort_values(['symbol', 'timestamp'])
         
-        # 7-day rolling average (using last 7 rows per symbol)
+        # 7-day rolling average
         df['rolling_avg_7d'] = df.groupby('symbol')['price_usd'].transform(
             lambda x: x.rolling(window=7, min_periods=1).mean()
         )
         
-        # 30-day rolling average (using last 30 rows)
+        # 30-day rolling average
         df['rolling_avg_30d'] = df.groupby('symbol')['price_usd'].transform(
             lambda x: x.rolling(window=30, min_periods=1).mean()
         )
         
-        # Daily return (percentage change from previous row per symbol)
+        # Daily return (percentage change from previous row)
         df['daily_return'] = df.groupby('symbol')['price_usd'].pct_change() * 100
         
-        # 7-day volatility (std dev of daily returns, rolling)
+        # 7-day volatility (std dev of daily returns)
         df['volatility_7d'] = df.groupby('symbol')['daily_return'].transform(
             lambda x: x.rolling(window=7, min_periods=1).std()
         )
         
-        # Fill NaN from rolling calculations (first few rows) with 0
+        # Fill NaN with 0
         df['rolling_avg_7d'] = df['rolling_avg_7d'].fillna(df['price_usd'])
         df['rolling_avg_30d'] = df['rolling_avg_30d'].fillna(df['price_usd'])
         df['daily_return'] = df['daily_return'].fillna(0)
@@ -103,33 +137,48 @@ class DataTransformer:
         return df
     
     def _add_dimension_mapping(self, df: pd.DataFrame) -> pd.DataFrame:
-        """
-        Prepare for SQL star schema:
-        - Map symbol codes to integer IDs (in production, you'd query the dimension table).
-        - Here we create a static mapping for now.
-        """
-        # Hardcoded mapping – in production, this would come from dim_symbol
+        """Add symbol_id mapping."""
+        df = df.copy()
+        
+        if 'symbol_id' in df.columns:
+            return df
+        
         symbol_map = {
             'BITCOIN': 1,
             'ETHEREUM': 2,
             'SOLANA': 3
         }
         df['symbol_id'] = df['symbol'].map(symbol_map)
-        
-        # If any symbol is unmapped, assign a default (should not happen)
         df['symbol_id'] = df['symbol_id'].fillna(0).astype(int)
-        
         return df
     
     def transform(self) -> pd.DataFrame:
         """Orchestrate the entire transformation pipeline."""
         logger.info("Starting transformation pipeline...")
         
+        # Step 0: Load historical data
+        logger.info("Loading historical data from database...")
+        hist_df = self._load_historical_data()
+        
+        # Combine historical + current
+        if not hist_df.empty:
+            current_df = self.raw_df.copy()
+            combined_df = pd.concat([hist_df, current_df], ignore_index=True)
+            combined_df = combined_df.drop_duplicates(
+                subset=['symbol', 'timestamp'], 
+                keep='last'
+            )
+            combined_df = combined_df.sort_values(['symbol', 'timestamp'])
+            logger.info(f"Combined dataset: {len(combined_df)} records ({len(hist_df)} historical + {len(current_df)} current)")
+            self.raw_df = combined_df
+        else:
+            logger.info("No historical data available. Using only current data.")
+        
         # Step 1: Validate
         self._validate_data()
         
         # Step 2: Handle nulls
-        cleaned = self._handle_nulls()
+        cleaned = self._handle_nulls(self.raw_df)
         self.cleaned_df = cleaned
         
         # Step 3: Feature engineering
@@ -138,18 +187,21 @@ class DataTransformer:
         # Step 4: Dimension mapping
         enriched = self._add_dimension_mapping(enriched)
         
-        # Step 5: Final column selection (order matters for SQL)
+        # Step 5: Final column selection
         final_columns = [
             'timestamp', 'symbol', 'symbol_id', 'price_usd', 
             'market_cap', 'volume_24h', 'change_24h',
             'rolling_avg_7d', 'rolling_avg_30d', 
             'daily_return', 'volatility_7d'
         ]
+        
+        for col in final_columns:
+            if col not in enriched.columns:
+                enriched[col] = 0
+        
         self.enriched_df = enriched[final_columns]
         
-        # Log stats
         logger.info(f"Transformation complete. Shape: {self.enriched_df.shape}")
-        logger.info(f"Columns: {self.enriched_df.columns.tolist()}")
         
         # Save transformed backup
         transformed_path = f"data/transformed/transformed_{datetime.now().strftime('%Y%m%d_%H%M')}.parquet"
@@ -160,9 +212,7 @@ class DataTransformer:
         return self.enriched_df
 
 
-# --- Standalone test ---
 if __name__ == "__main__":
-    # Simulate: load the latest raw JSON from extract
     import glob
     logging.basicConfig(level=logging.INFO)
     
@@ -179,5 +229,5 @@ if __name__ == "__main__":
     transformed_df = transformer.transform()
     
     print("\n--- Sample of Transformed Data ---")
-    print(transformed_df.head())
+    print(transformed_df.head(10))
     print(f"\nTotal rows: {len(transformed_df)}")

@@ -219,31 +219,126 @@ crypto-pipeline/
 
 ---
 
-## 🧠 Lessons Learned: UPSERT Logic
 
-### The Problem
+
+## 🧠 Lessons Learned: Real-World Challenges & Solutions
+
+### Challenge 1: UPSERT Logic
+
+**The Problem:**
 Early versions of this pipeline used `INSERT` only, causing duplicate rows for the same symbol and timestamp. This broke time-series analysis and inflated record counts.
 
-### The Solution
-**UPSERT (UPDATE + INSERT)** logic was implemented:
-- If a record with `(symbol_id, record_timestamp)` exists → **UPDATE** it
-- If it doesn't exist → **INSERT** a new record
+**The Solution:**
+`UPSERT (UPDATE + INSERT)` logic was implemented:
+- If a record with `(symbol_id, record_timestamp)` exists → UPDATE it
+- If it doesn't exist → INSERT a new record
 - A `UNIQUE(symbol_id, record_timestamp)` constraint prevents duplicates at the database level
 
-### What This Teaches
-Data engineers must always consider **idempotency** – running the same pipeline multiple times should produce the same result. UPSERT ensures your pipeline is **idempotent** and production-ready.
+**What it Teaches:**
+Data engineers must always consider `idempotency` – running the same pipeline multiple times should produce the same result. UPSERT ensures your pipeline is **idempotent** and production-ready.
 
+### Challenge 2: Daily Return & Volatility Were Always Zero
 
-### 📊 Understanding Financial Metrics
+**The Problem:**  
+After running the pipeline for multiple days, `daily_return` and `volatility_7d` columns remained zero. The feature engineering was not working as expected.
 
-**Why are `daily_return` and `volatility_7d` zero initially?**
+**Root Cause:**  
+The `transform.py` script was not loading historical data from the database. It only processed the current day's data, so `pct_change()` had nothing to compare against.
 
-These metrics require historical data:
-- **Daily Return** (`daily_return`) – Calculated by comparing today's price to yesterday's. Requires at least 2 days of data.
-- **Volatility** (`volatility_7d`) – Standard deviation of returns over the last 7 days. Requires at least 7 days of data.
+**The Solution:**
+1. Added a `_load_historical_data()` method that queries past records from `fact_market_data`
+2. Combined historical + current data before calculating rolling features
+3. Fixed connection issues by using **raw sqlite3** instead of SQLAlchemy (which caused `'Engine' object has no attribute 'cursor'` errors)
 
-**What to expect:** After running the pipeline daily for 7+ days, both metrics will automatically populate with real values. This is a feature, not a bug!
+**Result:**  
+After the fix, `daily_return` now shows real values. For example:
+- BITCOIN: 0.7702% (Sep 2 → Sep 3), 3.058% (Sep 3 → Sep 5)
+- ETHEREUM: 0.9197% (Sep 2 → Sep 3), 3.090% (Sep 3 → Sep 5)
+- SOLANA: 1.6741% (Sep 2 → Sep 3), 3.262% (Sep 3 → Sep 5)
 
+---
+
+### Challenge 3: Duplicate Rows on Every Pipeline Run
+
+**The Problem:**  
+Running the pipeline multiple times on the same day created duplicate rows for the same symbol and timestamp, inflating record counts and breaking time-series analysis.
+
+**Root Cause:**  
+The `load.py` script was using `INSERT` only, without checking if a record already existed for that symbol and date.
+
+**The Solution:**
+1. **Daily Granularity:** Converted timestamps to `YYYY-MM-DD` format so each day has only one record per symbol
+2. **UPSERT Logic:** Added `UPDATE` if a record exists, otherwise `INSERT`
+3. **Database Constraint:** Added `UNIQUE(symbol_id, record_timestamp)` constraint to prevent duplicates at the SQL level
+
+**Result:**  
+The pipeline is now **idempotent** – running it 100 times on the same day produces the same result as running it once.
+
+---
+
+### Challenge 4: Task Scheduler Missed Scheduled Runs
+
+**The Problem:**  
+Task Scheduler showed `Event 153: Task Scheduler did not launch task as it missed its schedule` for multiple days.
+
+**Root Cause:**  
+The task was not configured to catch up missed runs when the computer was off/sleeping.
+
+**The Solution:**  
+In Task Scheduler Properties → Settings tab, checked:
+- ✅ `Run task as soon as possible after a scheduled start is missed`
+- ✅ `Allow task to be run on demand`
+
+**Result:**  
+Now, if the computer is off at 9 AM, the task runs immediately when powered on.
+
+---
+
+### Challenge 5: Power BI Cyclic Reference Error
+
+**The Problem:**  
+Power BI threw a `cyclic reference was encountered during evaluation` error when refreshing data.
+
+**Root Cause:**  
+Power BI automatically created relationships between all tables, including a direct relationship between `fact_market_data` and `vw_weekly_trends`, causing a circular dependency.
+
+**The Solution:**  
+- Deleted the direct relationship between `fact_market_data` and `vw_weekly_trends`
+- Kept only the relationship `dim_symbol[symbol_id]` → `fact_market_data[symbol_id]`
+- Used `vw_weekly_trends` as a standalone table (no relationship needed)
+
+**Result:**  
+Refresh works without errors, and all visuals display correctly.
+
+---
+
+### Challenge 6: Power BI Connection String Issues
+
+**The Problem:**  
+Power BI rejected the connection string `DRIVER=SQLite3 ODBC Driver;Database=path\to\crypto_pipeline.db;` with error: `The connection property 'driver' cannot be used in credentials`.
+
+**Root Cause:**  
+Power BI does not allow `DRIVER=` in the credential section.
+
+**The Solution:**  
+Created a **System DSN** named `CryptoDB` and connected using:
+DSN=CryptoDB
+
+**Result:**  
+Power BI connects successfully to the SQLite database.
+
+---
+
+## 🎓 Key Takeaways for Data Engineering
+
+| Concept                      | Why It Matters                                                                                         |
+| ---------------------------- | ------------------------------------------------------------------------------------------------------ |
+| **Idempotency**              | Running the same pipeline multiple times should produce the same result. Essential for production ETL. |
+| **Historical Data Loading**  | Feature engineering (rolling averages, returns) requires historical context. Always load past data.    |
+| **UPSERT Logic**             | Prevents duplicates and maintains data integrity. Critical for time-series databases.                  |
+| **Error Handling & Retries** | APIs fail. Retry logic with exponential backoff ensures reliability.                                   |
+| **Data Granularity**         | Choose the right timestamp granularity (daily vs hourly) based on your use case.                       |
+| **Orchestration**            | Task Scheduler (or Airflow) ensures your pipeline runs consistently without manual intervention.       |
 
 ## 📝 Git Workflow (For This Project)
 

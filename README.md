@@ -140,7 +140,7 @@ Loaded 3 records into fact_market_data
 
 ## 📊 Dashboard Preview
 
-*(Add your dashboard screenshot here - see "Adding Screenshots" section below)*
+*Dashboard screenshot to be added*
 
 **Dashboard Features:**
 - 📈 **Price Trends** – Line chart with 7-day/30-day rolling averages
@@ -218,7 +218,6 @@ crypto-pipeline/
 - ✅ `Allow task to be run on demand`
 
 ---
-
 
 
 ## 🧠 Lessons Learned: Real-World Challenges & Solutions
@@ -375,7 +374,7 @@ git push
 
 **Harsha Naik**  
 [![GitHub](https://img.shields.io/badge/GitHub-HarshaNaik8-black?style=flat&logo=github)](https://github.com/HarshaNaik8)  
-[![LinkedIn](https://img.shields.io/badge/LinkedIn-HarshaNaik8-blue?style=flat&logo=linkedin)](https://linkedin.com/in/harsha-naik-361141217)
+[![LinkedIn](https://img.shields.io/badge/LinkedIn-HarshaNaik8-blue?style=flat&logo=linkedin)](https://www.linkedin.com/in/harsha-naik-664694292/)
 
 ---
 

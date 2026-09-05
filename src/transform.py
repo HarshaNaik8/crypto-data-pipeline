@@ -7,7 +7,7 @@ import numpy as np
 from datetime import datetime, timedelta
 from typing import Optional
 import logging
-from sqlalchemy import create_engine, text
+import sqlite3
 
 logger = logging.getLogger(__name__)
 
@@ -23,6 +23,10 @@ class DataTransformer:
         self.cleaned_df = None
         self.enriched_df = None
         self.connection_string = connection_string
+        # Extract database path from connection string
+        self.db_path = "crypto_pipeline.db"  # Default
+        if connection_string.startswith("sqlite:///"):
+            self.db_path = connection_string.replace("sqlite:///", "")
         
     def _validate_data(self) -> bool:
         """Basic data quality checks."""
@@ -44,18 +48,16 @@ class DataTransformer:
     def _load_historical_data(self) -> pd.DataFrame:
         """
         Load existing historical data from the database.
-        Uses SQLAlchemy properly.
+        Uses raw sqlite3 connection (most reliable for pandas).
         """
-        import sqlite3
-        
         try:
-            # Direct SQLite connection - more reliable!
-            conn = sqlite3.connect('crypto_pipeline.db')
+            # Direct sqlite3 connection
+            conn = sqlite3.connect(self.db_path)
             
             # Check if table exists
             cursor = conn.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='fact_market_data'")
             if not cursor.fetchone():
-                logger.info("No historical data found (fact_market_data table does not exist)")
+                logger.info("Historical table does not exist yet")
                 conn.close()
                 return pd.DataFrame()
             
@@ -69,13 +71,15 @@ class DataTransformer:
                 FROM fact_market_data f
                 JOIN dim_symbol d ON f.symbol_id = d.symbol_id
                 ORDER BY f.record_timestamp
-            """, conn)
+            """, conn)  # sqlite3 connection works perfectly here
             
             conn.close()
             
             if not hist_df.empty:
-                logger.info(f"Loaded {len(hist_df)} historical records from database")
                 hist_df['timestamp'] = pd.to_datetime(hist_df['timestamp'])
+                logger.info(f"✅ Successfully loaded {len(hist_df)} historical records")
+                logger.info(f"   - Symbols: {hist_df['symbol'].unique().tolist()}")
+                logger.info(f"   - Date range: {hist_df['timestamp'].min()} to {hist_df['timestamp'].max()}")
                 return hist_df
             else:
                 logger.info("No historical records found in database")
@@ -83,6 +87,7 @@ class DataTransformer:
                 
         except Exception as e:
             logger.warning(f"Could not load historical data: {e}")
+            logger.info("Falling back to current data only (first run or empty DB)")
             return pd.DataFrame()
     
     def _handle_nulls(self, df: pd.DataFrame) -> pd.DataFrame:
@@ -94,7 +99,7 @@ class DataTransformer:
             if col in df.columns:
                 df[col] = df.groupby('symbol')[col].ffill()
         
-        df = df.dropna(subset=['price_usd', 'volume_24h'])
+        df = df.dropna(subset=['price_usd'])
         logger.info(f"Null handling complete. Shape: {df.shape}")
         return df
     
@@ -119,10 +124,10 @@ class DataTransformer:
             lambda x: x.rolling(window=30, min_periods=1).mean()
         )
         
-        # Daily return (percentage change from previous row)
+        # Daily return from previous row
         df['daily_return'] = df.groupby('symbol')['price_usd'].pct_change() * 100
         
-        # 7-day volatility (std dev of daily returns)
+        # 7-day volatility
         df['volatility_7d'] = df.groupby('symbol')['daily_return'].transform(
             lambda x: x.rolling(window=7, min_periods=1).std()
         )
@@ -133,7 +138,8 @@ class DataTransformer:
         df['daily_return'] = df['daily_return'].fillna(0)
         df['volatility_7d'] = df['volatility_7d'].fillna(0)
         
-        logger.info("Feature engineering complete.")
+        non_zero_returns = (df['daily_return'] != 0).sum()
+        logger.info(f"Feature engineering complete. {non_zero_returns} rows have non-zero daily_return")
         return df
     
     def _add_dimension_mapping(self, df: pd.DataFrame) -> pd.DataFrame:
@@ -154,10 +160,12 @@ class DataTransformer:
     
     def transform(self) -> pd.DataFrame:
         """Orchestrate the entire transformation pipeline."""
-        logger.info("Starting transformation pipeline...")
+        logger.info("=" * 60)
+        logger.info("STARTING TRANSFORMATION PIPELINE")
+        logger.info("=" * 60)
         
         # Step 0: Load historical data
-        logger.info("Loading historical data from database...")
+        logger.info("📂 Loading historical data from database...")
         hist_df = self._load_historical_data()
         
         # Combine historical + current
@@ -169,10 +177,12 @@ class DataTransformer:
                 keep='last'
             )
             combined_df = combined_df.sort_values(['symbol', 'timestamp'])
-            logger.info(f"Combined dataset: {len(combined_df)} records ({len(hist_df)} historical + {len(current_df)} current)")
+            logger.info(f"📊 Combined dataset: {len(combined_df)} records")
+            logger.info(f"   - Historical: {len(hist_df)}")
+            logger.info(f"   - Current: {len(current_df)}")
             self.raw_df = combined_df
         else:
-            logger.info("No historical data available. Using only current data.")
+            logger.info("📊 No historical data. Using only current data (first run)")
         
         # Step 1: Validate
         self._validate_data()
@@ -201,19 +211,28 @@ class DataTransformer:
         
         self.enriched_df = enriched[final_columns]
         
-        logger.info(f"Transformation complete. Shape: {self.enriched_df.shape}")
+        # Log summary
+        logger.info("=" * 60)
+        logger.info("✅ TRANSFORMATION COMPLETE")
+        logger.info(f"   - Rows: {len(self.enriched_df)}")
+        logger.info(f"   - Symbols: {self.enriched_df['symbol'].unique().tolist()}")
+        logger.info(f"   - Date range: {self.enriched_df['timestamp'].min()} to {self.enriched_df['timestamp'].max()}")
+        non_zero = (self.enriched_df['daily_return'] != 0).sum()
+        logger.info(f"   - Non-zero daily_return rows: {non_zero}")
+        logger.info("=" * 60)
         
         # Save transformed backup
         transformed_path = f"data/transformed/transformed_{datetime.now().strftime('%Y%m%d_%H%M')}.parquet"
         os.makedirs("data/transformed", exist_ok=True)
         self.enriched_df.to_parquet(transformed_path, index=False)
-        logger.info(f"Transformed data saved to {transformed_path}")
+        logger.info(f"💾 Transformed data saved to {transformed_path}")
         
         return self.enriched_df
 
 
 if __name__ == "__main__":
     import glob
+    import sys
     logging.basicConfig(level=logging.INFO)
     
     raw_files = sorted(glob.glob("data/raw/raw_*.json"))
@@ -228,6 +247,9 @@ if __name__ == "__main__":
     transformer = DataTransformer(raw_df)
     transformed_df = transformer.transform()
     
-    print("\n--- Sample of Transformed Data ---")
-    print(transformed_df.head(10))
+    print("\n" + "=" * 60)
+    print("SAMPLE OF TRANSFORMED DATA")
+    print("=" * 60)
+    print(transformed_df[['symbol', 'timestamp', 'price_usd', 'daily_return']].to_string())
     print(f"\nTotal rows: {len(transformed_df)}")
+    print(f"Non-zero daily_return: {(transformed_df['daily_return'] != 0).sum()}")

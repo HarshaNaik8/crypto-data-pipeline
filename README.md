@@ -328,6 +328,33 @@ Power BI connects successfully to the SQLite database.
 
 ---
 
+## 📊 Data Quality & Handling
+
+### Missing Data in Historical Records
+
+Some `market_cap`, `volume_24h`, and `change_24h` values are NULL for backfilled dates (Sep 11-15, 2026). This is a deliberate design choice:
+
+| Source | Endpoint Used | Data Returned |
+|--------|---------------|---------------|
+| Live API (`run_etl.py`) | `/simple/price` | Full data (price, market cap, volume, change) |
+| Historical API (`backfill_etl.py`) | `/coins/{id}/history` | Partial data (price, market cap, volume only) |
+
+**Why NULL instead of 0?**
+Storing NULL is **honest** – it tells downstream users "we don't have this data" rather than "this value is 0." Faking 0s would mislead analysts.
+
+**What's Always Populated?**
+- `price_usd` ✅
+- `daily_return` ✅
+- `volatility_7d` ✅
+- `rolling_avg_7d` ✅
+- `rolling_avg_30d` ✅
+
+**Forward-Looking:** Every new day will have full data because the live API returns everything.
+
+**Production Improvement:** Would implement retry logic with longer backoff or upgrade to a paid CoinGecko plan for complete historical data.
+
+---
+
 ## 🎓 Key Takeaways for Data Engineering
 
 | Concept                      | Why It Matters                                                                                         |

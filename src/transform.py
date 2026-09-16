@@ -23,7 +23,8 @@ class DataTransformer:
         self.cleaned_df = None
         self.enriched_df = None
         self.connection_string = connection_string
-        self.db_path = "crypto_pipeline.db"
+        # Extract database path from connection string
+        self.db_path = "crypto_pipeline.db"  # Default
         if connection_string.startswith("sqlite:///"):
             self.db_path = connection_string.replace("sqlite:///", "")
         
@@ -37,23 +38,11 @@ class DataTransformer:
         if missing:
             raise ValueError(f"Missing columns: {missing}")
         
-        # Ensure price is positive
         if (self.raw_df['price_usd'] <= 0).any():
             logger.warning("Negative or zero prices found, dropping rows")
             self.raw_df = self.raw_df[self.raw_df['price_usd'] > 0]
         
-        # Convert timestamp to datetime
         self.raw_df['timestamp'] = pd.to_datetime(self.raw_df['timestamp'])
-        
-        # Force float dtype for price and volume
-        self.raw_df['price_usd'] = self.raw_df['price_usd'].astype(float)
-        if 'market_cap' in self.raw_df.columns:
-            self.raw_df['market_cap'] = self.raw_df['market_cap'].astype(float)
-        if 'volume_24h' in self.raw_df.columns:
-            self.raw_df['volume_24h'] = self.raw_df['volume_24h'].astype(float)
-        if 'change_24h' in self.raw_df.columns:
-            self.raw_df['change_24h'] = self.raw_df['change_24h'].astype(float)
-        
         return True
     
     def _load_historical_data(self) -> pd.DataFrame:
@@ -62,6 +51,7 @@ class DataTransformer:
         Uses raw sqlite3 connection (most reliable for pandas).
         """
         try:
+            # Direct sqlite3 connection
             conn = sqlite3.connect(self.db_path)
             
             # Check if table exists
@@ -81,14 +71,12 @@ class DataTransformer:
                 FROM fact_market_data f
                 JOIN dim_symbol d ON f.symbol_id = d.symbol_id
                 ORDER BY f.record_timestamp
-            """, conn)
+            """, conn)  # sqlite3 connection works perfectly here
             
             conn.close()
             
             if not hist_df.empty:
                 hist_df['timestamp'] = pd.to_datetime(hist_df['timestamp'])
-                # Force float dtype
-                hist_df['price_usd'] = hist_df['price_usd'].astype(float)
                 logger.info(f"✅ Successfully loaded {len(hist_df)} historical records")
                 logger.info(f"   - Symbols: {hist_df['symbol'].unique().tolist()}")
                 logger.info(f"   - Date range: {hist_df['timestamp'].min()} to {hist_df['timestamp'].max()}")
@@ -126,9 +114,6 @@ class DataTransformer:
         df = df.copy()
         df = df.sort_values(['symbol', 'timestamp'])
         
-        # Ensure price is float
-        df['price_usd'] = df['price_usd'].astype(float)
-        
         # 7-day rolling average
         df['rolling_avg_7d'] = df.groupby('symbol')['price_usd'].transform(
             lambda x: x.rolling(window=7, min_periods=1).mean()
@@ -139,21 +124,19 @@ class DataTransformer:
             lambda x: x.rolling(window=30, min_periods=1).mean()
         )
         
-        # Daily return (percentage change from previous row) – force float
+        # Daily return from previous row
         df['daily_return'] = df.groupby('symbol')['price_usd'].pct_change() * 100
-        df['daily_return'] = df['daily_return'].astype(float)
         
         # 7-day volatility
         df['volatility_7d'] = df.groupby('symbol')['daily_return'].transform(
             lambda x: x.rolling(window=7, min_periods=1).std()
         )
-        df['volatility_7d'] = df['volatility_7d'].astype(float)
         
         # Fill NaN with 0
         df['rolling_avg_7d'] = df['rolling_avg_7d'].fillna(df['price_usd'])
         df['rolling_avg_30d'] = df['rolling_avg_30d'].fillna(df['price_usd'])
-        df['daily_return'] = df['daily_return'].fillna(0).astype(float)
-        df['volatility_7d'] = df['volatility_7d'].fillna(0).astype(float)
+        df['daily_return'] = df['daily_return'].fillna(0)
+        df['volatility_7d'] = df['volatility_7d'].fillna(0)
         
         non_zero_returns = (df['daily_return'] != 0).sum()
         logger.info(f"Feature engineering complete. {non_zero_returns} rows have non-zero daily_return")
@@ -188,8 +171,6 @@ class DataTransformer:
         # Combine historical + current
         if not hist_df.empty:
             current_df = self.raw_df.copy()
-            # Ensure current_df has float price
-            current_df['price_usd'] = current_df['price_usd'].astype(float)
             combined_df = pd.concat([hist_df, current_df], ignore_index=True)
             combined_df = combined_df.drop_duplicates(
                 subset=['symbol', 'timestamp'], 
@@ -202,7 +183,6 @@ class DataTransformer:
             self.raw_df = combined_df
         else:
             logger.info("📊 No historical data. Using only current data (first run)")
-            self.raw_df['price_usd'] = self.raw_df['price_usd'].astype(float)
         
         # Step 1: Validate
         self._validate_data()
@@ -227,7 +207,7 @@ class DataTransformer:
         
         for col in final_columns:
             if col not in enriched.columns:
-                enriched[col] = 0.0
+                enriched[col] = 0
         
         self.enriched_df = enriched[final_columns]
         

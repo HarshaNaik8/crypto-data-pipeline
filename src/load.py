@@ -96,19 +96,12 @@ class DatabaseLoader:
         # 🔥 CRITICAL: Convert to DAILY granularity (YYYY-MM-DD)
         df['record_date'] = df['record_timestamp'].dt.date
         
-        # Select columns and force float
+        # Select columns
         fact_cols = ['symbol_id', 'price_usd', 'market_cap', 'volume_24h', 'change_24h',
                     'rolling_avg_7d', 'rolling_avg_30d', 'daily_return', 'volatility_7d', 'record_date']
         
         df_to_load = df[fact_cols].copy()
         df_to_load = df_to_load.rename(columns={'record_date': 'record_timestamp'})
-        
-        # Force float for numeric columns
-        numeric_cols = ['price_usd', 'market_cap', 'volume_24h', 'change_24h',
-                    'rolling_avg_7d', 'rolling_avg_30d', 'daily_return', 'volatility_7d']
-        for col in numeric_cols:
-            if col in df_to_load.columns:
-                df_to_load[col] = df_to_load[col].astype(float)
         
         with self.engine.connect() as conn:
             for _, row in df_to_load.iterrows():
@@ -132,17 +125,18 @@ class DatabaseLoader:
                             volatility_7d = :vol7
                         WHERE symbol_id = :sid AND DATE(record_timestamp) = DATE(:ts)
                     """), {
-                        "price": float(row['price_usd']),
-                        "mcap": float(row['market_cap']),
-                        "vol": float(row['volume_24h']),
-                        "chg": float(row['change_24h']),
-                        "ra7": float(row['rolling_avg_7d']),
-                        "ra30": float(row['rolling_avg_30d']),
-                        "ret": float(row['daily_return']),
-                        "vol7": float(row['volatility_7d']),
+                        "price": row['price_usd'],
+                        "mcap": row['market_cap'],
+                        "vol": row['volume_24h'],
+                        "chg": row['change_24h'],
+                        "ra7": row['rolling_avg_7d'],
+                        "ra30": row['rolling_avg_30d'],
+                        "ret": row['daily_return'],
+                        "vol7": row['volatility_7d'],
                         "sid": row['symbol_id'],
                         "ts": row['record_timestamp']
                     })
+                    # ✅ FIXED: row['record_timestamp'] is already a date object, so no .date() needed
                     logger.debug(f"UPDATED: symbol_id={row['symbol_id']}, date={row['record_timestamp']}")
                 else:
                     # INSERT new record
@@ -156,16 +150,17 @@ class DatabaseLoader:
                         )
                     """), {
                         "sid": row['symbol_id'],
-                        "price": float(row['price_usd']),
-                        "mcap": float(row['market_cap']),
-                        "vol": float(row['volume_24h']),
-                        "chg": float(row['change_24h']),
-                        "ra7": float(row['rolling_avg_7d']),
-                        "ra30": float(row['rolling_avg_30d']),
-                        "ret": float(row['daily_return']),
-                        "vol7": float(row['volatility_7d']),
+                        "price": row['price_usd'],
+                        "mcap": row['market_cap'],
+                        "vol": row['volume_24h'],
+                        "chg": row['change_24h'],
+                        "ra7": row['rolling_avg_7d'],
+                        "ra30": row['rolling_avg_30d'],
+                        "ret": row['daily_return'],
+                        "vol7": row['volatility_7d'],
                         "ts": row['record_timestamp']
                     })
+                    # ✅ FIXED: row['record_timestamp'] is already a date object, so no .date() needed
                     logger.debug(f"INSERTED: symbol_id={row['symbol_id']}, date={row['record_timestamp']}")
             
             conn.commit()

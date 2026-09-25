@@ -1,19 +1,13 @@
 # run_etl.py
-"""Single-run ETL script for Task Scheduler."""
+"""
+Single-run entry point for Windows Task Scheduler.
+Exits with code 0 (success) or 1 (failure) so Task Scheduler can detect failures.
+"""
 import sys
-import logging
+from src.utils import setup_logging
 from pipeline import run_pipeline
 
 if __name__ == "__main__":
-    logging.basicConfig(
-        level=logging.INFO,
-        format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
-    )
-    logger = logging.getLogger("TaskScheduler")
-    logger.info("Scheduled ETL started by Task Scheduler")
-    try:
-        run_pipeline()
-    except Exception as e:
-        logger.error(f"ETL failed: {e}", exc_info=True)
-        sys.exit(1)
-    logger.info("Scheduled ETL completed successfully")
+    setup_logging()
+    success = run_pipeline()
+    sys.exit(0 if success else 1)

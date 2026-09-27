@@ -30,21 +30,21 @@ flowchart TD
 
     subgraph Storage ["3. Data Warehousing (Load)"]
         LOAD_READY --> LOAD[src/load.py]
-        LOAD -->|Dynamic Dim Key Lookup| DIM[(dim_symbol)]
-        LOAD -->|Atomic INSERT OR REPLACE<br/>UNIQUE Constraint Guard| FACT[(fact_market_data)]
-        FACT -->|DDL View Creation| VIEW[(vw_weekly_trends)]
+        LOAD -->|"Dynamic Dim Key Lookup"| DIM[(dim_symbol)]
+        LOAD -->|"Atomic INSERT OR REPLACE<br/>UNIQUE Constraint Guard"| FACT[(fact_market_data)]
+        FACT -->|"DDL View Creation"| VIEW[(vw_weekly_trends)]
     end
 
     subgraph Orchestration ["4. Orchestration & Scheduling"]
-        WTS[Windows Task Scheduler<br/>Daily 11:00 AM] --> RUN_BAT[run_pipeline.bat]
+        WTS["Windows Task Scheduler<br/>Daily 11:00 AM"] --> RUN_BAT[run_pipeline.bat]
         RUN_BAT --> RUN_ETL[run_etl.py]
         RUN_ETL --> pipeline[pipeline.py]
     end
 
     subgraph BI ["5. Analytics & Dashboard"]
-        VIEW -.->|ODBC DSN: CryptoDB| PBI[Power BI Desktop / Dashboard]
-        FACT -.->|Star Schema (1:*)| PBI
-        DIM -.->|Dimension Filtering| PBI
+        VIEW -.->|"ODBC DSN: CryptoDB"| PBI["Power BI Desktop / Dashboard"]
+        FACT -.->|"Star Schema (1:*)"| PBI
+        DIM -.->|"Dimension Filtering"| PBI
     end
 ```
 
@@ -57,15 +57,21 @@ In institutional investment environments (e.g., Goldman Sachs, Morgan Stanley), 
 ### Engineered Financial Metrics
 
 1. **Daily Return ($R_t$)**:
-   $$\text{Daily Return}_t = \left(\frac{P_t - P_{t-1}}{P_{t-1}}\right) \times 100$$
+
+   $$ \text{Daily Return}_t = \left(\frac{P_t - P_{t-1}}{P_{t-1}}\right) \times 100 $$
+
    *Captures percentage asset movement between consecutive trading periods.*
 
 2. **Rolling Moving Averages (7-Day & 30-Day)**:
-   $$\text{SMA}_{k,t} = \frac{1}{k}\sum_{i=0}^{k-1} P_{t-i} \quad \text{for } k \in \{7, 30\}$$
+
+   $$ \text{SMA}_{k,t} = \frac{1}{k}\sum_{i=0}^{k-1} P_{t-i} \quad \text{for } k \in \{7, 30\} $$
+
    *Smooths short-term price noise to highlight intermediate and monthly momentum.*
 
 3. **7-Day Rolling Volatility ($\sigma_{7d}$)**:
-   $$\sigma_{7d} = \sqrt{\frac{1}{n-1} \sum_{i=1}^{n} (R_i - \bar{R})^2} \quad \text{over 7-day rolling window}$$
+
+   $$ \sigma_{7d} = \sqrt{\frac{1}{n-1} \sum_{i=1}^{n} (R_i - \bar{R})^2} \quad \text{over 7-day rolling window} $$
+
    *Quantifies asset price turbulence and risk exposure.*
 
 ---
@@ -258,8 +264,8 @@ The pipeline is designed to be triggered autonomously via Windows Task Scheduler
      - Settings: **Daily**, Start at **11:00:00 AM**, Recur every **1** day.
    - **Actions Tab**:
      - Action: *Start a program*
-     - Program/script: `D:\4th_year\project\crypto-pipeline\run_pipeline.bat`
-     - Start in: `D:\4th_year\project\crypto-pipeline`
+     - Program/script: `C:\path\to\crypto-pipeline\run_pipeline.bat`
+     - Start in: `C:\path\to\crypto-pipeline`
    - **Settings Tab**:
      - ✅ Check: *Run task as soon as possible after a scheduled start is missed* (Ensures catch-up if computer is powered off at 11:00 AM).
      - ✅ Check: *If the task fails, restart every: 10 minutes, Attempt to restart up to: 3 times*.
@@ -288,7 +294,7 @@ The pipeline is designed to be triggered autonomously via Windows Task Scheduler
 3. Click **Add...** → Select **SQLite3 ODBC Driver** → Click **Finish**.
 4. Configure DSN:
    - **Data Source Name:** `CryptoDB`
-   - **Database Name:** Browse and select `D:\4th_year\project\crypto-pipeline\crypto_pipeline.db`
+   - **Database Name:** Browse and select `C:\path\to\crypto-pipeline\crypto_pipeline.db`
    - Leave options default and click **OK**.
 
 ### Step 2: Import into Power BI Desktop

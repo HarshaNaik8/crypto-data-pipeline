@@ -150,47 +150,59 @@ async def cmd_market(interaction: discord.Interaction):
     """Show the latest market prices for each tracked asset."""
     await interaction.response.defer()
 
-    # Get latest prices for each symbol
-    rows = query_db("""
-        SELECT ds.symbol_code, f.price_usd, f.change_24h, f.volume,
-               f.rolling_avg_7d, f.volatility_7d, f.daily_return, f.record_timestamp
-        FROM fact_market_data f
-        JOIN dim_symbol ds ON f.symbol_id = ds.symbol_id
-        WHERE f.record_timestamp = (SELECT MAX(record_timestamp) FROM fact_market_data)
-        ORDER BY f.price_usd DESC
-    """)
+    try:
+        # Get latest prices for each symbol
+        rows = query_db("""
+            SELECT ds.symbol_code, f.price_usd, f.change_24h, f.volume_24h,
+                   f.market_cap, f.rolling_avg_7d, f.volatility_7d,
+                   f.daily_return, f.record_timestamp
+            FROM fact_market_data f
+            JOIN dim_symbol ds ON f.symbol_id = ds.symbol_id
+            WHERE f.record_timestamp = (SELECT MAX(record_timestamp) FROM fact_market_data)
+            ORDER BY f.price_usd DESC
+        """)
 
-    if not rows:
-        await interaction.followup.send("❌ No market data found in database.")
-        return
+        if not rows:
+            await interaction.followup.send("❌ No market data found in database.")
+            return
 
-    embed = discord.Embed(
-        title="💰 Latest Market Snapshot",
-        description=f"Data from: **{rows[0]['record_timestamp']}**",
-        color=COLOR_SUCCESS,
-        timestamp=datetime.now(timezone.utc),
-    )
-
-    for row in rows:
-        symbol = row["symbol_code"].upper()
-        price = format_price(row["price_usd"])
-        change = format_pct(row["change_24h"])
-        vol = f"${row['volume']:,.0f}" if row["volume"] else "N/A"
-        avg7 = format_price(row["rolling_avg_7d"])
-        volatility = format_pct(row["volatility_7d"])
-        daily_ret = format_pct(row["daily_return"])
-
-        field_value = (
-            f"**Price:** `{price}`\n"
-            f"**24h Change:** `{change}`\n"
-            f"**Volume:** `{vol}`\n"
-            f"**7d Avg:** `{avg7}` | **Volatility:** `{volatility}`\n"
-            f"**Daily Return:** `{daily_ret}`"
+        embed = discord.Embed(
+            title="💰 Latest Market Snapshot",
+            description=f"Data from: **{rows[0]['record_timestamp']}**",
+            color=COLOR_SUCCESS,
+            timestamp=datetime.now(timezone.utc),
         )
-        embed.add_field(name=f"🪙 {symbol}", value=field_value, inline=False)
 
-    embed.set_footer(text="Crypto Pipeline Sentinel")
-    await interaction.followup.send(embed=embed)
+        for row in rows:
+            symbol = row["symbol_code"].upper()
+            price = format_price(row["price_usd"])
+            change = format_pct(row["change_24h"])
+            vol = f"${row['volume_24h']:,.0f}" if row["volume_24h"] else "N/A"
+            mcap = f"${row['market_cap']:,.0f}" if row["market_cap"] else "N/A"
+            avg7 = format_price(row["rolling_avg_7d"])
+            volatility = format_pct(row["volatility_7d"])
+            daily_ret = format_pct(row["daily_return"])
+
+            field_value = (
+                f"**Price:** `{price}`\n"
+                f"**24h Change:** `{change}`\n"
+                f"**Volume:** `{vol}` | **Mkt Cap:** `{mcap}`\n"
+                f"**7d Avg:** `{avg7}` | **Volatility:** `{volatility}`\n"
+                f"**Daily Return:** `{daily_ret}`"
+            )
+            embed.add_field(name=f"🪙 {symbol}", value=field_value, inline=False)
+
+        embed.set_footer(text="Crypto Pipeline Sentinel")
+        await interaction.followup.send(embed=embed)
+
+    except Exception as e:
+        await interaction.followup.send(
+            embed=discord.Embed(
+                title="❌ /market Error",
+                description=f"```{str(e)[:500]}```",
+                color=COLOR_FAILURE,
+            )
+        )
 
 
 @tree.command(name="test", description="🧪 Run the full pytest suite and report results")
@@ -433,6 +445,31 @@ async def on_ready():
     print(f"📡 Connected to {len(client.guilds)} server(s)")
     print(f"⚡ {len(tree.get_commands())} slash commands registered")
     print(f"{'='*60}")
+
+
+@tree.error
+async def on_app_command_error(interaction: discord.Interaction, error: app_commands.AppCommandError):
+    """
+    Global error handler — catches ANY unhandled exception in ANY slash command.
+    This prevents the dreaded 'Bot is thinking...' infinite hang.
+    When a command crashes, Discord gets a clean error embed instead of silence.
+    """
+    error_msg = str(error)[:500]
+    embed = discord.Embed(
+        title="❌ Command Error",
+        description=f"An error occurred while processing your command.\n```{error_msg}```",
+        color=COLOR_FAILURE,
+        timestamp=datetime.now(timezone.utc),
+    )
+    embed.set_footer(text="Crypto Pipeline Sentinel")
+
+    try:
+        if interaction.response.is_done():
+            await interaction.followup.send(embed=embed)
+        else:
+            await interaction.response.send_message(embed=embed, ephemeral=True)
+    except Exception:
+        pass  # Absolute last resort — silently fail rather than crash the bot
 
 
 # ══════════════════════════════════════════════════════════════════════════════

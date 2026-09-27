@@ -1,10 +1,12 @@
 # 🚀 Production-Grade Real-Time Crypto Market Data Pipeline
 
+[![CI / Testing Pipeline](https://github.com/HarshaNaik8/crypto-data-pipeline/actions/workflows/ci.yml/badge.svg)](https://github.com/HarshaNaik8/crypto-data-pipeline/actions)
 [![Python](https://img.shields.io/badge/Python-3.11-3776AB?style=flat&logo=python&logoColor=white)](https://www.python.org/)
 [![Database](https://img.shields.io/badge/SQLite-Star--Schema-003B57?style=flat&logo=sqlite&logoColor=white)](https://www.sqlite.org/)
-[![Testing](https://img.shields.io/badge/Tests-20%2F20%20Passing-brightgreen?style=flat&logo=pytest&logoColor=white)](https://docs.pytest.org/)
+[![Testing](https://img.shields.io/badge/Tests-25%2F25%20Passing-brightgreen?style=flat&logo=pytest&logoColor=white)](https://docs.pytest.org/)
+[![Docker](https://img.shields.io/badge/Docker-Ready-2496ED?style=flat&logo=docker&logoColor=white)](https://www.docker.com/)
+[![Alerts](https://img.shields.io/badge/Discord-Alerting_Active-5865F2?style=flat&logo=discord&logoColor=white)](https://discord.com/)
 [![Power BI](https://img.shields.io/badge/Power_BI-ODBC_Direct-F2C811?style=flat&logo=powerbi&logoColor=black)](https://powerbi.microsoft.com/)
-[![Automation](https://img.shields.io/badge/Automation-Windows_Task_Scheduler-0078D4?style=flat&logo=windows&logoColor=white)](https://learn.microsoft.com/en-us/windows/win32/taskschd/)
 [![License](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 
 An enterprise-ready, end-to-end data engineering pipeline that automatically extracts, validates, transforms, stores, and visualizes live cryptocurrency market data (Bitcoin, Ethereum, Solana). Designed with financial engineering principles, idempotency, database-level integrity, resilience against API rate-limiting, automated orchestration, and interactive business intelligence reporting.
@@ -329,34 +331,56 @@ Navigate to the **Model View** tab in Power BI:
 
 ---
 
-## 🧪 10. Automated Testing Suite
+## 🧪 10. Automated Testing Suite & CI/CD
 
-The repository contains 20 comprehensive unit and integration tests located in `tests/`:
+The repository contains 25 comprehensive unit and integration tests located in `tests/`, automatically validated via GitHub Actions CI on every commit:
 
 ```bash
 $ pytest tests/ -v
 ============================= test session starts =============================
-tests/test_extract.py::TestShouldGiveUp::test_gives_up_on_400 PASSED     [  5%]
-tests/test_extract.py::TestShouldGiveUp::test_gives_up_on_403 PASSED     [ 10%]
-tests/test_extract.py::TestShouldGiveUp::test_retries_on_429 PASSED      [ 15%]
-tests/test_extract.py::TestShouldGiveUp::test_retries_on_500 PASSED      [ 20%]
-tests/test_extract.py::TestShouldGiveUp::test_retries_on_503 PASSED      [ 25%]
-tests/test_extract.py::TestShouldGiveUp::test_retries_on_network_error PASSED [ 30%]
-tests/test_extract.py::TestCoinGeckoExtractor::test_extract_all_returns_dataframe PASSED [ 35%]
-tests/test_extract.py::TestCoinGeckoExtractor::test_extract_all_has_required_columns PASSED [ 40%]
-tests/test_extract.py::TestCoinGeckoExtractor::test_symbol_is_uppercased PASSED [ 45%]
-tests/test_extract.py::TestCoinGeckoExtractor::test_all_symbols_fail_raises PASSED [ 50%]
-tests/test_transform.py::TestDataTransformer::test_basic_transform_returns_dataframe PASSED [ 55%]
-tests/test_transform.py::TestDataTransformer::test_output_has_required_columns PASSED [ 60%]
-tests/test_transform.py::TestDataTransformer::test_daily_return_is_nonzero_after_first_row PASSED [ 65%]
-tests/test_transform.py::TestDataTransformer::test_no_negative_volatility PASSED [ 70%]
-tests/test_transform.py::TestDataTransformer::test_empty_dataframe_raises PASSED [ 75%]
-tests/test_transform.py::TestDataTransformer::test_symbol_upper_cased PASSED [ 80%]
-tests/test_transform.py::TestDataTransformer::test_no_nan_in_critical_columns PASSED [ 85%]
-tests/test_transform.py::TestLoadTransformIntegration::test_load_inserts_rows PASSED [ 90%]
-tests/test_transform.py::TestLoadTransformIntegration::test_upsert_no_duplicates PASSED [ 95%]
+tests/test_alerts.py::TestDiscordAlerts::test_webhook_skipped_when_url_missing PASSED [  4%]
+tests/test_alerts.py::TestDiscordAlerts::test_webhook_successful_delivery PASSED [  8%]
+tests/test_alerts.py::TestDiscordAlerts::test_webhook_handles_network_exception_gracefully PASSED [ 12%]
+tests/test_alerts.py::TestDiscordAlerts::test_notify_success_embed_structure PASSED [ 16%]
+tests/test_alerts.py::TestDiscordAlerts::test_notify_failure_embed_structure PASSED [ 20%]
+tests/test_extract.py::TestShouldGiveUp::test_gives_up_on_400 PASSED     [ 24%]
+tests/test_extract.py::TestShouldGiveUp::test_gives_up_on_403 PASSED     [ 28%]
+tests/test_extract.py::TestShouldGiveUp::test_retries_on_429 PASSED      [ 32%]
+tests/test_extract.py::TestShouldGiveUp::test_retries_on_500 PASSED      [ 36%]
+tests/test_extract.py::TestShouldGiveUp::test_retries_on_503 PASSED      [ 40%]
+tests/test_extract.py::TestShouldGiveUp::test_retries_on_network_error PASSED [ 44%]
+tests/test_extract.py::TestCoinGeckoExtractor::test_extract_all_returns_dataframe PASSED [ 48%]
+tests/test_extract.py::TestCoinGeckoExtractor::test_extract_all_has_required_columns PASSED [ 52%]
+tests/test_extract.py::TestCoinGeckoExtractor::test_symbol_is_uppercased PASSED [ 56%]
+tests/test_extract.py::TestCoinGeckoExtractor::test_all_symbols_fail_raises PASSED [ 60%]
+tests/test_transform.py::TestDataTransformer::test_basic_transform_returns_dataframe PASSED [ 64%]
+tests/test_transform.py::TestDataTransformer::test_output_has_required_columns PASSED [ 68%]
+tests/test_transform.py::TestDataTransformer::test_daily_return_is_nonzero_after_first_row PASSED [ 72%]
+tests/test_transform.py::TestDataTransformer::test_no_negative_volatility PASSED [ 76%]
+tests/test_transform.py::TestDataTransformer::test_empty_dataframe_raises PASSED [ 80%]
+tests/test_transform.py::TestDataTransformer::test_symbol_upper_cased PASSED [ 84%]
+tests/test_transform.py::TestDataTransformer::test_no_nan_in_critical_columns PASSED [ 88%]
+tests/test_transform.py::TestLoadTransformIntegration::test_load_inserts_rows PASSED [ 92%]
+tests/test_transform.py::TestLoadTransformIntegration::test_upsert_no_duplicates PASSED [ 96%]
 tests/test_transform.py::TestLoadTransformIntegration::test_fact_has_unique_constraint PASSED [100%]
-============================= 20 passed in 2.94s ==============================
+
+============================= 25 passed in 6.21s ==============================
+```
+
+---
+
+## 🐳 11. Containerization (Docker & Docker Compose)
+
+The pipeline is fully containerized to guarantee environment reproducibility across any OS:
+
+```bash
+# Build and run the entire pipeline container with Docker Compose
+docker compose up --build
+```
+Or run with native Docker CLI:
+```bash
+docker build -t crypto-pipeline:latest .
+docker run --env-file .env -v $(pwd)/crypto_pipeline.db:/app/crypto_pipeline.db crypto-pipeline:latest
 ```
 
 ---

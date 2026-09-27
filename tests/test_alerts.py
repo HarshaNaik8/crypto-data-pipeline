@@ -18,8 +18,10 @@ from src.alerts import (
 
 
 class TestDiscordAlerts:
-    def test_webhook_skipped_when_url_missing(self):
+    @patch("src.alerts.get_webhook_url")
+    def test_webhook_skipped_when_url_missing(self, mock_get_url):
         """When webhook URL is None or empty, sending should return False silently."""
+        mock_get_url.return_value = None
         result = send_discord_webhook(embed={"title": "Test"}, webhook_url="")
         assert result is False
 

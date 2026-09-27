@@ -60,21 +60,27 @@ In institutional investment environments (e.g., Goldman Sachs, Morgan Stanley), 
 
 1. **Daily Return ($R_t$)**:
 
-   $$ \text{Daily Return}_t = \left(\frac{P_t - P_{t-1}}{P_{t-1}}\right) \times 100 $$
+$$
+\text{Daily Return}_t = \left(\frac{P_t - P_{t-1}}{P_{t-1}}\right) \times 100
+$$
 
-   *Captures percentage asset movement between consecutive trading periods.*
+*Captures percentage asset movement between consecutive trading periods.*
 
 2. **Rolling Moving Averages (7-Day & 30-Day)**:
 
-   $$ \text{SMA}_{k,t} = \frac{1}{k}\sum_{i=0}^{k-1} P_{t-i} \quad \text{for } k \in \{7, 30\} $$
+$$
+\text{SMA}_{k,t} = \frac{1}{k}\sum_{i=0}^{k-1} P_{t-i} \quad \text{for } k \in \{7, 30\}
+$$
 
-   *Smooths short-term price noise to highlight intermediate and monthly momentum.*
+*Smooths short-term price noise to highlight intermediate and monthly momentum.*
 
 3. **7-Day Rolling Volatility ($\sigma_{7d}$)**:
 
-   $$ \sigma_{7d} = \sqrt{\frac{1}{n-1} \sum_{i=1}^{n} (R_i - \bar{R})^2} \quad \text{over 7-day rolling window} $$
+$$
+\sigma_{7d} = \sqrt{\frac{1}{n-1} \sum_{i=1}^{n} (R_i - \bar{R})^2} \quad \text{over 7-day rolling window}
+$$
 
-   *Quantifies asset price turbulence and risk exposure.*
+*Quantifies asset price turbulence and risk exposure.*
 
 ---
 

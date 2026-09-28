@@ -5,6 +5,7 @@ Importable from run_etl.py (Task Scheduler) or any other entry point.
 Includes end-to-end execution timing and Discord/Webhook alerting.
 """
 
+import os
 import time
 import logging
 from datetime import datetime

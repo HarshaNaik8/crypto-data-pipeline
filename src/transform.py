@@ -12,7 +12,6 @@ Key design decisions:
 
 import os
 import logging
-import sqlite3
 
 import numpy as np
 import pandas as pd
@@ -170,10 +169,9 @@ class DataTransformer:
 
         symbol_map: dict = {}
         try:
-            conn = sqlite3.connect(self.db_path)
-            cursor = conn.execute("SELECT symbol_code, symbol_id FROM dim_symbol")
-            symbol_map = {row[0].upper(): row[1] for row in cursor.fetchall()}
-            conn.close()
+            with self.engine.connect() as conn:
+                rows = conn.execute(text("SELECT symbol_code, symbol_id FROM dim_symbol")).fetchall()
+                symbol_map = {row[0].upper(): row[1] for row in rows}
             logger.info("Loaded symbol map from DB: %s", symbol_map)
         except Exception as exc:
             logger.warning("Could not load symbol map from DB: %s — using 0 as placeholder.", exc)

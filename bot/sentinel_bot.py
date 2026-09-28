@@ -26,7 +26,8 @@ import os
 import sys
 import time
 import subprocess
-import sqlite3
+import threading
+from http.server import HTTPServer, BaseHTTPRequestHandler
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -35,6 +36,30 @@ from discord import app_commands
 from dotenv import load_dotenv
 
 from sqlalchemy import create_engine, text
+
+# ── Lightweight HTTP health-check server for 24/7 cloud hosts (Render/Fly/Koyeb)
+class HealthCheckHandler(BaseHTTPRequestHandler):
+    def do_GET(self):
+        self.send_response(200)
+        self.send_header("Content-type", "application/json")
+        self.end_headers()
+        self.wfile.write(b'{"status":"healthy","bot":"online","service":"crypto-sentinel-bot"}\n')
+
+    def log_message(self, format, *args):
+        pass  # Suppress HTTP access logging in console
+
+
+def start_health_server():
+    """Run non-blocking health check HTTP server on daemon thread."""
+    port = int(os.getenv("PORT", "8080"))
+    try:
+        server = HTTPServer(("0.0.0.0", port), HealthCheckHandler)
+        t = threading.Thread(target=server.serve_forever, daemon=True)
+        t.start()
+        print(f"📡 Cloud Health HTTP server online on port {port}")
+    except Exception as exc:
+        print(f"⚠️ Health HTTP server failed to bind port {port}: {exc}")
+
 
 # ── Resolve project root so imports and DB paths work correctly ──────────────
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
@@ -418,18 +443,166 @@ async def cmd_health(interaction: discord.Interaction):
     await interaction.followup.send(embed=embed)
 
 
+@tree.command(name="cloud_db", description="☁️ Inspect live Neon Cloud PostgreSQL health, latency, and catalog")
+async def cmd_cloud_db(interaction: discord.Interaction):
+    """Deep-dive into Neon PostgreSQL health, latency, active connections, and table metrics."""
+    await interaction.response.defer()
+
+    t0 = time.time()
+    try:
+        with bot_engine.connect() as conn:
+            pg_version = conn.execute(text("SELECT version();")).scalar()
+            db_name = conn.execute(text("SELECT current_database();")).scalar()
+            active_conns = conn.execute(
+                text("SELECT count(*) FROM pg_stat_activity WHERE datname = current_database();")
+            ).scalar()
+            total_size_bytes = conn.execute(
+                text("SELECT pg_database_size(current_database());")
+            ).scalar() or 0
+
+            # Count rows in each table
+            fact_count = conn.execute(text("SELECT COUNT(*) FROM fact_market_data;")).scalar() or 0
+            dim_count = conn.execute(text("SELECT COUNT(*) FROM dim_symbol;")).scalar() or 0
+            view_count = conn.execute(text("SELECT COUNT(*) FROM vw_weekly_trends;")).scalar() or 0
+
+        latency_ms = (time.time() - t0) * 1000
+        size_mb = total_size_bytes / (1024 * 1024)
+
+        embed = discord.Embed(
+            title="☁️ Neon Cloud PostgreSQL Status",
+            description="Live connection metrics and catalog telemetry from Neon AWS.",
+            color=COLOR_SUCCESS,
+            timestamp=datetime.now(timezone.utc),
+        )
+        embed.add_field(name="🔌 Cloud Status", value="`🟢 ONLINE`", inline=True)
+        embed.add_field(name="⚡ Round-trip Latency", value=f"`{latency_ms:.1f} ms`", inline=True)
+        embed.add_field(name="🗄️ Database Name", value=f"`{db_name}`", inline=True)
+        embed.add_field(name="👥 Active Connections", value=f"`{active_conns}`", inline=True)
+        embed.add_field(name="💾 Storage Used", value=f"`{size_mb:.2f} MB / 512 MB`", inline=True)
+        embed.add_field(name="📊 Fact Rows", value=f"`{fact_count}` records", inline=True)
+        embed.add_field(name="🪙 Dim Symbols", value=f"`{dim_count}` symbols", inline=True)
+        embed.add_field(name="📈 Weekly View Rows", value=f"`{view_count}` aggregates", inline=True)
+        embed.add_field(name="⚙️ Engine Version", value=f"```{pg_version[:80]}...```", inline=False)
+        embed.set_footer(text="Neon Serverless PostgreSQL • AWS Singapore Region")
+        await interaction.followup.send(embed=embed)
+
+    except Exception as exc:
+        latency_ms = (time.time() - t0) * 1000
+        embed = discord.Embed(
+            title="☁️ Neon Cloud PostgreSQL Status",
+            description=f"❌ Failed to reach cloud database ({latency_ms:.1f}ms)\n```{str(exc)[:500]}```",
+            color=COLOR_FAILURE,
+            timestamp=datetime.now(timezone.utc),
+        )
+        await interaction.followup.send(embed=embed)
+
+
+@tree.command(name="history", description="📈 Historical price & volatility trend for a tracked asset")
+@app_commands.describe(symbol="The cryptocurrency to inspect (Bitcoin, Ethereum, or Solana)")
+@app_commands.choices(symbol=[
+    app_commands.Choice(name="Bitcoin (BTC)", value="BITCOIN"),
+    app_commands.Choice(name="Ethereum (ETH)", value="ETHEREUM"),
+    app_commands.Choice(name="Solana (SOL)", value="SOLANA"),
+])
+async def cmd_history(interaction: discord.Interaction, symbol: app_commands.Choice[str]):
+    """Show the last 7 recorded days of data for an asset from Neon PostgreSQL."""
+    await interaction.response.defer()
+
+    sym_code = symbol.value
+    rows = query_db("""
+        SELECT f.record_timestamp, f.price_usd, f.daily_return, f.volatility_7d, f.volume_24h
+        FROM fact_market_data f
+        JOIN dim_symbol d ON f.symbol_id = d.symbol_id
+        WHERE d.symbol_code = :sym
+        ORDER BY f.record_timestamp DESC
+        LIMIT 7
+    """, {"sym": sym_code})
+
+    if not rows:
+        await interaction.followup.send(f"❌ No historical data found for `{sym_code}`.")
+        return
+
+    embed = discord.Embed(
+        title=f"📈 {symbol.name} — Historical Trend",
+        description=f"Showing last **{len(rows)}** recorded day(s) from Neon PostgreSQL.",
+        color=COLOR_INFO,
+        timestamp=datetime.now(timezone.utc),
+    )
+
+    for r in rows:
+        date_str = r["record_timestamp"]
+        price = format_price(r["price_usd"])
+        daily_ret = format_pct(r["daily_return"])
+        vol = format_pct(r["volatility_7d"])
+        embed.add_field(
+            name=f"📅 {date_str}",
+            value=f"Price: **{price}** | Return: `{daily_ret}` | 7d Vol: `{vol}`",
+            inline=False,
+        )
+
+    embed.set_footer(text="Crypto Pipeline Sentinel • Neon PostgreSQL")
+    await interaction.followup.send(embed=embed)
+
+
+@tree.command(name="verify_etl", description="🔍 Verify if today's scheduled ETL execution is completed")
+async def cmd_verify_etl(interaction: discord.Interaction):
+    """Check whether today's ETL execution has run and loaded data."""
+    await interaction.response.defer()
+
+    today_str = datetime.now().strftime("%Y-%m-%d")
+    rows = query_db("""
+        SELECT d.symbol_code, f.price_usd, f.record_timestamp
+        FROM fact_market_data f
+        JOIN dim_symbol d ON f.symbol_id = d.symbol_id
+        WHERE f.record_timestamp = :today
+        ORDER BY d.symbol_code
+    """, {"today": today_str})
+
+    if rows:
+        embed = discord.Embed(
+            title="✅ Today's ETL Execution Verified",
+            description=f"All records for today (**{today_str}**) are safely written in Neon PostgreSQL!",
+            color=COLOR_SUCCESS,
+            timestamp=datetime.now(timezone.utc),
+        )
+        for r in rows:
+            embed.add_field(
+                name=f"🪙 {r['symbol_code']}",
+                value=f"Price: `{format_price(r['price_usd'])}`",
+                inline=True,
+            )
+        embed.add_field(name="⏰ Next Scheduled Run", value="`Tomorrow at 05:35 AM IST` (00:05 UTC)", inline=False)
+    else:
+        last_date_row = query_db("SELECT MAX(record_timestamp) as last_date FROM fact_market_data")
+        last_date = last_date_row[0]["last_date"] if last_date_row and last_date_row[0]["last_date"] else "None"
+        embed = discord.Embed(
+            title="⏳ Today's ETL Pending",
+            description=f"No rows recorded for today (**{today_str}**) yet.\nLatest available data in DB is from: **{last_date}**.",
+            color=COLOR_WARNING,
+            timestamp=datetime.now(timezone.utc),
+        )
+        embed.add_field(name="⏰ Next Cloud Run", value="Scheduled for `05:35 AM IST` via GitHub Actions", inline=False)
+        embed.add_field(name="💡 Manual Run", value="You can run `/run` right here or trigger GitHub Actions!", inline=False)
+
+    embed.set_footer(text="Crypto Pipeline Sentinel")
+    await interaction.followup.send(embed=embed)
+
+
 @tree.command(name="help_pipe", description="📖 Show all available bot commands")
 async def cmd_help_pipe(interaction: discord.Interaction):
     """Display help for all available commands."""
     embed = discord.Embed(
         title="📖 Crypto Pipeline Sentinel — Command Reference",
-        description="All available slash commands for managing and monitoring your data pipeline.",
+        description="All 10 available slash commands for monitoring and managing your cloud pipeline.",
         color=COLOR_INFO,
     )
 
     commands_list = [
-        ("/status", "📊 Pipeline health overview — last run date, row counts, DB size"),
+        ("/status", "📊 Pipeline health overview — date range, row counts, DB size"),
         ("/market", "💰 Latest market prices for all tracked crypto assets"),
+        ("/history", "📈 Historical price & volatility trends for a chosen asset"),
+        ("/cloud_db", "☁️ Deep-dive into Neon PostgreSQL health, latency, & catalog"),
+        ("/verify_etl", "🔍 Verify whether today's scheduled ETL execution has completed"),
         ("/test", "🧪 Run the full pytest suite (25 tests) and see results"),
         ("/run", "🚀 Manually trigger the ETL pipeline (Extract → Transform → Load)"),
         ("/dbstats", "🗄️ Detailed database table statistics per symbol"),
@@ -440,7 +613,7 @@ async def cmd_help_pipe(interaction: discord.Interaction):
     for cmd, desc in commands_list:
         embed.add_field(name=f"`{cmd}`", value=desc, inline=False)
 
-    embed.set_footer(text="Crypto Pipeline Sentinel • Built with discord.py")
+    embed.set_footer(text="Crypto Pipeline Sentinel • Built with discord.py & Neon PostgreSQL")
     await interaction.response.send_message(embed=embed)
 
 
@@ -484,33 +657,6 @@ async def on_app_command_error(interaction: discord.Interaction, error: app_comm
         pass  # Absolute last resort — silently fail rather than crash the bot
 
 
-import threading
-from http.server import HTTPServer, BaseHTTPRequestHandler
-
-
-class HealthCheckHandler(BaseHTTPRequestHandler):
-    """Minimal HTTP handler to satisfy cloud platform health check requirements."""
-    def do_GET(self):
-        self.send_response(200)
-        self.send_header("Content-Type", "application/json")
-        self.end_headers()
-        self.wfile.write(b'{"status": "healthy", "service": "Crypto Pipeline Sentinel Bot", "version": "2.0"}')
-
-    def log_message(self, format, *args):
-        pass  # Suppress HTTP access logging to keep terminal/console clean
-
-
-def start_health_server():
-    """Start HTTP server in background thread to bind to $PORT for cloud deployment."""
-    port = int(os.getenv("PORT", 8080))
-    try:
-        server = HTTPServer(("0.0.0.0", port), HealthCheckHandler)
-        print(f"🌐 Cloud Health Check server listening on port {port}")
-        server.serve_forever()
-    except Exception as exc:
-        print(f"⚠️ Health server warning: {exc}")
-
-
 # ══════════════════════════════════════════════════════════════════════════════
 # Entry Point
 # ══════════════════════════════════════════════════════════════════════════════
@@ -522,9 +668,7 @@ def main():
         print("Get your token from: https://discord.com/developers/applications")
         sys.exit(1)
 
-    # Launch health check server in daemon thread for cloud platforms (Render/Koyeb/Railway)
-    threading.Thread(target=start_health_server, daemon=True).start()
-
+    start_health_server()
     print("🚀 Starting Crypto Pipeline Sentinel Bot...")
     client.run(DISCORD_BOT_TOKEN)
 

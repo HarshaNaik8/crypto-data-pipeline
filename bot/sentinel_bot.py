@@ -484,6 +484,33 @@ async def on_app_command_error(interaction: discord.Interaction, error: app_comm
         pass  # Absolute last resort — silently fail rather than crash the bot
 
 
+import threading
+from http.server import HTTPServer, BaseHTTPRequestHandler
+
+
+class HealthCheckHandler(BaseHTTPRequestHandler):
+    """Minimal HTTP handler to satisfy cloud platform health check requirements."""
+    def do_GET(self):
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json")
+        self.end_headers()
+        self.wfile.write(b'{"status": "healthy", "service": "Crypto Pipeline Sentinel Bot", "version": "2.0"}')
+
+    def log_message(self, format, *args):
+        pass  # Suppress HTTP access logging to keep terminal/console clean
+
+
+def start_health_server():
+    """Start HTTP server in background thread to bind to $PORT for cloud deployment."""
+    port = int(os.getenv("PORT", 8080))
+    try:
+        server = HTTPServer(("0.0.0.0", port), HealthCheckHandler)
+        print(f"🌐 Cloud Health Check server listening on port {port}")
+        server.serve_forever()
+    except Exception as exc:
+        print(f"⚠️ Health server warning: {exc}")
+
+
 # ══════════════════════════════════════════════════════════════════════════════
 # Entry Point
 # ══════════════════════════════════════════════════════════════════════════════
@@ -494,6 +521,9 @@ def main():
         print("Please add:  DISCORD_BOT_TOKEN=your_token_here")
         print("Get your token from: https://discord.com/developers/applications")
         sys.exit(1)
+
+    # Launch health check server in daemon thread for cloud platforms (Render/Koyeb/Railway)
+    threading.Thread(target=start_health_server, daemon=True).start()
 
     print("🚀 Starting Crypto Pipeline Sentinel Bot...")
     client.run(DISCORD_BOT_TOKEN)

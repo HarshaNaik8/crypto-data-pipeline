@@ -2,8 +2,8 @@ name: Daily Scheduled ETL Pipeline
 
 on:
   schedule:
-    # 05:30 UTC = 11:00 AM IST (Indian Standard Time) every day
-    - cron: '30 5 * * *'
+    # 00:05 UTC = 05:35 AM IST (Optimal: 5 minutes after 00:00 UTC global crypto daily close)
+    - cron: '5 0 * * *'
   workflow_dispatch:  # Allows manual 1-click execution from GitHub Actions UI
 
 jobs:

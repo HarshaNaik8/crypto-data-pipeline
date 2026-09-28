@@ -7,10 +7,23 @@ services:
     env_file:
       - .env
     volumes:
-      # Mount SQLite database file to persist transactions onto the host machine
+      # Mount SQLite database file to persist transactions onto host machine
       - ./crypto_pipeline.db:/app/crypto_pipeline.db
       # Mount execution logs for local observability
       - ./logs:/app/logs
       # Mount raw and transformed audit snapshots
       - ./data:/app/data
     restart: "no"
+
+  sentinel-bot:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: crypto_sentinel_bot
+    command: ["python", "bot/sentinel_bot.py"]
+    env_file:
+      - .env
+    volumes:
+      - ./crypto_pipeline.db:/app/crypto_pipeline.db
+      - ./logs:/app/logs
+    restart: unless-stopped

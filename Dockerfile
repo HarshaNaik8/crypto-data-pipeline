@@ -26,6 +26,8 @@ RUN pip install --no-cache-dir --upgrade pip && \
 
 # Step 3: Copy application source code and configurations
 COPY src/ /app/src/
+COPY bot/ /app/bot/
+COPY scripts/ /app/scripts/
 COPY pipeline.py /app/pipeline.py
 COPY run_etl.py /app/run_etl.py
 

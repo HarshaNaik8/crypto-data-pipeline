@@ -34,6 +34,8 @@ import discord
 from discord import app_commands
 from dotenv import load_dotenv
 
+from sqlalchemy import create_engine, text
+
 # ── Resolve project root so imports and DB paths work correctly ──────────────
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
@@ -45,6 +47,11 @@ load_dotenv(PROJECT_ROOT / ".env")
 DISCORD_BOT_TOKEN = os.getenv("DISCORD_BOT_TOKEN", "")
 DB_PATH = PROJECT_ROOT / "crypto_pipeline.db"
 VENV_PYTHON = PROJECT_ROOT / "venv" / "Scripts" / "python.exe"
+
+# Database engine: automatically connects to Neon Cloud Postgres if configured, else SQLite
+DB_CONNECTION_STRING = os.getenv("NEON_DB_URL") or os.getenv("DB_CONNECTION_STRING", f"sqlite:///{DB_PATH}")
+bot_engine = create_engine(DB_CONNECTION_STRING)
+is_postgres = "postgresql" in DB_CONNECTION_STRING
 
 # ── Embed color constants ────────────────────────────────────────────────────
 COLOR_SUCCESS = 0x2ECC71  # Emerald Green
@@ -64,21 +71,26 @@ tree = app_commands.CommandTree(client)
 
 # ── Helper Functions ─────────────────────────────────────────────────────────
 
-def query_db(sql: str, params: tuple = ()) -> list[dict]:
-    """Execute a read-only SQL query and return results as list of dicts."""
-    if not DB_PATH.exists():
-        return []
-    conn = sqlite3.connect(str(DB_PATH))
-    conn.row_factory = sqlite3.Row
+def query_db(sql: str, params: dict | None = None) -> list[dict]:
+    """Execute a read-only SQL query via SQLAlchemy and return results as list of dicts."""
     try:
-        rows = conn.execute(sql, params).fetchall()
-        return [dict(row) for row in rows]
-    finally:
-        conn.close()
+        with bot_engine.connect() as conn:
+            result = conn.execute(text(sql), params or {})
+            return [dict(row._mapping) for row in result.fetchall()]
+    except Exception as exc:
+        print(f"Database query error: {exc}")
+        return []
 
 
 def get_db_size_mb() -> float:
-    """Get the SQLite database file size in megabytes."""
+    """Get database size in megabytes (queries Postgres catalog or SQLite file)."""
+    if is_postgres:
+        try:
+            with bot_engine.connect() as conn:
+                size_bytes = conn.execute(text("SELECT pg_database_size(current_database())")).scalar()
+                return float(size_bytes or 0) / (1024 * 1024)
+        except Exception:
+            return 0.0
     if not DB_PATH.exists():
         return 0.0
     return DB_PATH.stat().st_size / (1024 * 1024)

@@ -18,6 +18,7 @@ import numpy as np
 import pandas as pd
 from datetime import datetime
 from typing import Optional
+from sqlalchemy import create_engine, text, inspect
 
 from src.utils import get_db_path, safe_float
 
@@ -37,6 +38,7 @@ class DataTransformer:
         self.enriched_df: Optional[pd.DataFrame] = None
         self.connection_string = connection_string
         self.db_path = get_db_path(connection_string)
+        self.engine = create_engine(connection_string)
 
     # ── Validation ────────────────────────────────────────────────────────────
 
@@ -64,34 +66,30 @@ class DataTransformer:
     def _load_historical_data(self) -> pd.DataFrame:
         """
         Load past records from fact_market_data for rolling-feature context.
-        Uses raw sqlite3 (not SQLAlchemy) — pd.read_sql requires a DBAPI connection.
+        Uses SQLAlchemy inspector and connection — works on SQLite and PostgreSQL.
         """
         try:
-            conn = sqlite3.connect(self.db_path)
-            cursor = conn.execute(
-                "SELECT name FROM sqlite_master WHERE type='table' AND name='fact_market_data'"
-            )
-            if not cursor.fetchone():
+            inspector = inspect(self.engine)
+            if not inspector.has_table("fact_market_data"):
                 logger.info("fact_market_data does not exist yet (first run).")
-                conn.close()
                 return pd.DataFrame()
 
-            hist_df = pd.read_sql(
-                """
-                SELECT
-                    d.symbol_code  AS symbol,
-                    f.price_usd,
-                    f.market_cap,
-                    f.volume_24h,
-                    f.change_24h,
-                    f.record_timestamp AS timestamp
-                FROM fact_market_data f
-                JOIN dim_symbol d ON f.symbol_id = d.symbol_id
-                ORDER BY f.record_timestamp
-                """,
-                conn,
-            )
-            conn.close()
+            with self.engine.connect() as conn:
+                hist_df = pd.read_sql(
+                    text("""
+                    SELECT
+                        d.symbol_code  AS symbol,
+                        f.price_usd,
+                        f.market_cap,
+                        f.volume_24h,
+                        f.change_24h,
+                        f.record_timestamp AS timestamp
+                    FROM fact_market_data f
+                    JOIN dim_symbol d ON f.symbol_id = d.symbol_id
+                    ORDER BY f.record_timestamp
+                    """),
+                    conn,
+                )
 
             if hist_df.empty:
                 logger.info("No historical records in DB yet.")

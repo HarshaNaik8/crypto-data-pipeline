@@ -19,11 +19,13 @@ from src.alerts import notify_success, notify_failure
 logger = logging.getLogger("pipeline")
 
 
-def run_pipeline(connection_string: str = "sqlite:///crypto_pipeline.db") -> bool:
+def run_pipeline(connection_string: str | None = None) -> bool:
     """
     Full ETL: Extract → Transform → Load → Refresh weekly view → Observability Alerts.
+    Automatically connects to Neon Cloud Postgres if configured, otherwise falls back to SQLite.
     Returns True on success, False on failure.
     """
+    conn_str = connection_string or os.getenv("NEON_DB_URL") or os.getenv("DB_CONNECTION_STRING", "sqlite:///crypto_pipeline.db")
     start_time = time.time()
     current_phase = "INITIALIZATION"
     raw_df = None
@@ -44,20 +46,20 @@ def run_pipeline(connection_string: str = "sqlite:///crypto_pipeline.db") -> boo
         # ── Transform ─────────────────────────────────────────────────────────
         current_phase = "TRANSFORM"
         logger.info("Phase 2: TRANSFORM")
-        transformer = DataTransformer(raw_df, connection_string=connection_string)
+        transformer = DataTransformer(raw_df, connection_string=conn_str)
         transformed_df = transformer.transform()
         logger.info("Transformed %d new rows with financial features.", len(transformed_df))
 
         # ── Load ──────────────────────────────────────────────────────────────
         current_phase = "LOAD"
         logger.info("Phase 3: LOAD")
-        loader = DatabaseLoader(connection_string=connection_string)
+        loader = DatabaseLoader(connection_string=conn_str)
         loader.run(transformed_df)
 
         # ── Refresh weekly view ───────────────────────────────────────────────
         current_phase = "REFRESH WEEKLY VIEW"
         logger.info("Phase 4: REFRESH WEEKLY VIEW")
-        create_weekly_aggregate_view(connection_string)
+        create_weekly_aggregate_view(conn_str)
 
         duration = time.time() - start_time
         logger.info("Pipeline completed successfully in %.2fs at %s", duration, datetime.now().strftime("%H:%M:%S"))

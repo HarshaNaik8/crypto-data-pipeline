@@ -1,0 +1,42 @@
+name: Daily Scheduled ETL Pipeline
+
+on:
+  schedule:
+    # 05:30 UTC = 11:00 AM IST (Indian Standard Time) every day
+    - cron: '30 5 * * *'
+  workflow_dispatch:  # Allows manual 1-click execution from GitHub Actions UI
+
+jobs:
+  run-etl:
+    name: Execute Cloud ETL to Neon PostgreSQL
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: Install System Dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libpq-dev unixodbc-dev
+
+      - name: Install Python Dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Run Pipeline (Extract → Transform → Load → Alert)
+        env:
+          NEON_DB_URL: ${{ secrets.NEON_DB_URL }}
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+          COINGECKO_BASE_URL: https://api.coingecko.com/api/v3
+          SYMBOLS: bitcoin,ethereum,solana
+          LOG_LEVEL: INFO
+        run: |
+          python run_etl.py

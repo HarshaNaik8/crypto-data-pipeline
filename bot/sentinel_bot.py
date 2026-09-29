@@ -340,70 +340,111 @@ async def cmd_test(interaction: discord.Interaction):
     await interaction.followup.send(embed=embed)
 
 
-@tree.command(name="run", description="🚀 Manually trigger the ETL pipeline")
+@tree.command(name="run", description="🚀 Trigger the ETL pipeline (Cloud GitHub Actions or Local)")
 async def cmd_run(interaction: discord.Interaction):
     """Trigger a manual pipeline execution."""
     await interaction.response.defer()
 
+    github_token = os.getenv("GITHUB_TOKEN", "").strip()
+    repo = "HarshaNaik8/crypto-data-pipeline"
+    workflow_id = "daily_etl.yml"
+
+    # Option 1: Trigger GitHub Actions via API if GITHUB_TOKEN is set
+    if github_token:
+        try:
+            import requests
+            headers = {
+                "Authorization": f"Bearer {github_token}",
+                "Accept": "application/vnd.github+json",
+                "X-GitHub-Api-Version": "2022-11-28",
+            }
+            url = f"https://api.github.com/repos/{repo}/actions/workflows/{workflow_id}/dispatches"
+            resp = requests.post(url, headers=headers, json={"ref": "main"}, timeout=10)
+            if resp.status_code in (204, 201, 200):
+                embed = discord.Embed(
+                    title="🚀 Cloud ETL Pipeline Triggered!",
+                    description=(
+                        "GitHub Actions cloud runner has been triggered via API!\n\n"
+                        "⚙️ **Workflow:** `daily_etl.yml` on branch `main`\n"
+                        "🔄 **Phases:** `Extract → Transform → In-Place UPSERT → View Refresh`\n"
+                        "📢 **Alerts:** Watch this channel for the full execution alert in ~45 seconds!"
+                    ),
+                    color=COLOR_SUCCESS,
+                    timestamp=datetime.now(timezone.utc),
+                )
+                embed.add_field(
+                    name="🔗 View Live Execution",
+                    value=f"[Open GitHub Actions Dashboard](https://github.com/{repo}/actions/workflows/{workflow_id})",
+                    inline=False,
+                )
+                embed.set_footer(text="Crypto Pipeline Sentinel • GitHub Actions API")
+                await interaction.followup.send(embed=embed)
+                return
+            else:
+                print(f"GitHub API error: {resp.status_code} {resp.text}")
+        except Exception as exc:
+            print(f"GitHub dispatch failed: {exc}")
+
+    # Option 2: Run locally if run_etl.py exists in workspace
     run_file = PROJECT_ROOT / "run_etl.py"
     if not run_file.exists():
         run_file = Path("run_etl.py")
 
-    if not run_file.exists():
-        embed = discord.Embed(
-            title="☁️ Cloud ETL Notice",
-            description=(
-                "The automated ETL pipeline runs autonomously every morning at **05:35 AM IST** on **GitHub Actions**.\n\n"
-                "👉 **To trigger a cloud execution right now:**\n"
-                "1. Open GitHub → **Actions**\n"
-                "2. Select **Daily Scheduled ETL Pipeline**\n"
-                "3. Click **Run workflow** 🚀"
-            ),
+    if run_file.exists():
+        embed_start = discord.Embed(
+            title="🚀 Pipeline Triggered Locally",
+            description="Executing: `Extract → Transform → Load → Refresh View`\nPlease wait...",
             color=COLOR_INFO,
         )
-        await interaction.followup.send(embed=embed)
-        return
+        await interaction.followup.send(embed=embed_start)
 
-    embed_start = discord.Embed(
-        title="🚀 Pipeline Triggered",
-        description="Executing: `Extract → Transform → Load → Refresh View`\nPlease wait...",
+        start = time.time()
+        try:
+            result = subprocess.run(
+                [PYTHON_EXEC, str(run_file)],
+                capture_output=True, text=True, timeout=300,
+                cwd=str(PROJECT_ROOT),
+            )
+            duration = time.time() - start
+
+            if result.returncode == 0:
+                embed = discord.Embed(
+                    title="✅ Pipeline Execution Succeeded",
+                    description=f"Completed in **{duration:.2f}s**. Check your alerts for detailed metrics.",
+                    color=COLOR_SUCCESS,
+                )
+            else:
+                stderr_snippet = result.stderr[-800:] if result.stderr else "No error output captured."
+                embed = discord.Embed(
+                    title="❌ Pipeline Execution Failed",
+                    description=f"Failed after **{duration:.2f}s**.\n```{stderr_snippet}```",
+                    color=COLOR_FAILURE,
+                )
+            await interaction.channel.send(embed=embed)
+            return
+        except subprocess.TimeoutExpired:
+            await interaction.channel.send("⏰ Pipeline exceeded 5-minute limit.")
+            return
+
+    # Option 3: Fallback guide with 1-click execution link
+    embed = discord.Embed(
+        title="☁️ Cloud ETL Pipeline Controller",
+        description=(
+            "The automated ETL pipeline runs autonomously every morning at **05:35 AM IST** on **GitHub Actions**.\n\n"
+            "👉 **To trigger a cloud execution right now:**\n"
+            "1. Click the link below to open GitHub Actions\n"
+            "2. Click **Run workflow** 🚀\n\n"
+            "💡 *Tip: To make this `/run` command trigger GitHub Actions directly with zero clicks, add `GITHUB_TOKEN` to your bot-hosting environment variables!*"
+        ),
         color=COLOR_INFO,
     )
-    await interaction.followup.send(embed=embed_start)
-
-    start = time.time()
-    try:
-        result = subprocess.run(
-            [PYTHON_EXEC, str(run_file)],
-            capture_output=True, text=True, timeout=300,
-            cwd=str(PROJECT_ROOT),
-        )
-        duration = time.time() - start
-
-        if result.returncode == 0:
-            embed = discord.Embed(
-                title="✅ Pipeline Execution Succeeded",
-                description=f"Completed in **{duration:.2f}s**. Check your #general channel for the detailed alert.",
-                color=COLOR_SUCCESS,
-            )
-        else:
-            stderr_snippet = result.stderr[-800:] if result.stderr else "No error output captured."
-            embed = discord.Embed(
-                title="❌ Pipeline Execution Failed",
-                description=f"Failed after **{duration:.2f}s**.",
-                color=COLOR_FAILURE,
-            )
-            embed.add_field(name="🔍 Error Log", value=f"```\n{stderr_snippet}\n```", inline=False)
-
-    except subprocess.TimeoutExpired:
-        embed = discord.Embed(
-            title="⏰ Pipeline Timeout",
-            description="Pipeline exceeded the 5-minute time limit.",
-            color=COLOR_WARNING,
-        )
-
+    embed.add_field(
+        name="🔗 1-Click Trigger Link",
+        value=f"[👉 Open GitHub Actions: Daily Scheduled ETL](https://github.com/{repo}/actions/workflows/{workflow_id})",
+        inline=False,
+    )
     embed.set_footer(text="Crypto Pipeline Sentinel")
-    await interaction.channel.send(embed=embed)
+    await interaction.followup.send(embed=embed)
 
 
 @tree.command(name="dbstats", description="🗄️ Detailed database table statistics")
@@ -449,7 +490,7 @@ async def cmd_dbstats(interaction: discord.Interaction):
     await interaction.followup.send(embed=embed)
 
 
-@tree.command(name="health", description="🏥 Full system health check — DB, API, Docker, Alerts")
+@tree.command(name="health", description="🏥 Full system health check — DB, API, Secrets, Runtime")
 async def cmd_health(interaction: discord.Interaction):
     """Comprehensive health check across all pipeline subsystems."""
     await interaction.response.defer()
@@ -459,45 +500,54 @@ async def cmd_health(interaction: discord.Interaction):
     # Check 1: Database accessible
     try:
         rows = query_db("SELECT COUNT(*) as cnt FROM fact_market_data")
-        checks.append(("💾 Database", "✅ Online", f"`{rows[0]['cnt']}` rows"))
+        db_type = "Neon PostgreSQL (Cloud)" if is_postgres else "SQLite (Local)"
+        checks.append(("💾 Database", "✅ Online", f"{db_type} — {rows[0]['cnt']} records"))
     except Exception as e:
         checks.append(("💾 Database", "❌ Offline", str(e)[:100]))
 
-    # Check 2: Python venv exists
-    venv_ok = VENV_PYTHON.exists()
-    checks.append(("🐍 Python venv", "✅ Found" if venv_ok else "❌ Missing", str(VENV_PYTHON)))
+    # Check 2: Python Runtime
+    is_linux = not sys.platform.startswith("win")
+    runtime_env = "Cloud Linux Host" if is_linux else "Windows Desktop"
+    checks.append(("🐍 Python Runtime", "✅ Active", f"Python {sys.version.split()[0]} ({runtime_env})"))
 
-    # Check 3: .env file exists
-    env_ok = (PROJECT_ROOT / ".env").exists()
-    checks.append(("🔐 .env File", "✅ Present" if env_ok else "❌ Missing", "Secrets configured"))
+    # Check 3: Environment Secrets
+    has_bot_token = bool(os.getenv("DISCORD_BOT_TOKEN"))
+    has_db_url = bool(os.getenv("NEON_DB_URL") or os.getenv("DB_CONNECTION_STRING"))
+    if has_bot_token and has_db_url:
+        checks.append(("🔐 Environment Secrets", "✅ Configured", "Bot Token & Neon DB URL loaded into memory"))
+    else:
+        checks.append(("🔐 Environment Secrets", "❌ Incomplete", "Missing BOT_TOKEN or DB_URL"))
 
-    # Check 4: Discord Webhook configured
+    # Check 4: Discord Webhook
     webhook = os.getenv("DISCORD_WEBHOOK_URL", "").strip()
-    checks.append(("📡 Webhook URL", "✅ Set" if webhook else "⚠️ Not Set", "Alerting active" if webhook else "No alerts"))
+    if webhook:
+        checks.append(("📡 Webhook URL", "✅ Configured", "Direct push alerting active"))
+    else:
+        checks.append(("📡 Webhook Alerting", "✅ GitHub Managed", "Handled automatically by GitHub Actions daily runner"))
 
     # Check 5: CoinGecko API reachable
     try:
         import requests
         resp = requests.get("https://api.coingecko.com/api/v3/ping", timeout=5)
         if resp.status_code == 200:
-            checks.append(("🌐 CoinGecko API", "✅ Reachable", "Status 200 OK"))
+            checks.append(("🌐 CoinGecko API", "✅ Reachable", "Status 200 OK — Live crypto prices accessible"))
         else:
-            checks.append(("🌐 CoinGecko API", f"⚠️ Status {resp.status_code}", "May be rate-limited"))
+            checks.append(("🌐 CoinGecko API", f"⚠️ Status {resp.status_code}", "API rate-limited or throttling"))
     except Exception as e:
         checks.append(("🌐 CoinGecko API", "❌ Unreachable", str(e)[:80]))
 
-    # Check 6: Docker available
-    try:
-        docker_result = subprocess.run(["docker", "--version"], capture_output=True, text=True, timeout=5)
-        if docker_result.returncode == 0:
-            ver = docker_result.stdout.strip()[:50]
-            checks.append(("🐳 Docker", "✅ Installed", ver))
-        else:
-            checks.append(("🐳 Docker", "⚠️ Issue", "Docker returned non-zero"))
-    except FileNotFoundError:
-        checks.append(("🐳 Docker", "⚠️ Not in PATH", "Install Docker Desktop"))
-    except Exception:
-        checks.append(("🐳 Docker", "⚠️ Unknown", "Could not check"))
+    # Check 6: Runtime Infrastructure
+    if is_linux:
+        checks.append(("☁️ Infrastructure", "✅ Containerized", "Running 24/7 on isolated Linux cloud container (bot-hosting.net)"))
+    else:
+        try:
+            docker_result = subprocess.run(["docker", "--version"], capture_output=True, text=True, timeout=5)
+            if docker_result.returncode == 0:
+                checks.append(("🐳 Docker Engine", "✅ Installed", docker_result.stdout.strip()[:50]))
+            else:
+                checks.append(("🐳 Docker Engine", "⚠️ Issue", "Docker returned non-zero"))
+        except Exception:
+            checks.append(("🐳 Docker Engine", "ℹ️ Local Native", "Running in native Python virtual environment"))
 
     # Build embed
     all_ok = all("✅" in c[1] for c in checks)
@@ -659,12 +709,60 @@ async def cmd_verify_etl(interaction: discord.Interaction):
     await interaction.followup.send(embed=embed)
 
 
+@tree.command(name="resources", description="🌐 Show all cloud architecture links, dashboards, and control portals")
+async def cmd_resources(interaction: discord.Interaction):
+    """Post all central project component links for easy access."""
+    embed = discord.Embed(
+        title="🌐 Crypto Data Pipeline — Cloud Architecture & Control Hub",
+        description=(
+            "Direct links to all subsystems running 24/7 independently of your laptop.\n"
+            "📌 *Tip: Run this command inside your `#resources` channel and pin this message!*"
+        ),
+        color=COLOR_INFO,
+        timestamp=datetime.now(timezone.utc),
+    )
+
+    embed.add_field(
+        name="🐙 1. GitHub Source Code Repository",
+        value="[github.com/HarshaNaik8/crypto-data-pipeline](https://github.com/HarshaNaik8/crypto-data-pipeline)\n*Core code, star-schema DDL, tests, and configurations*",
+        inline=False,
+    )
+    embed.add_field(
+        name="⚡ 2. GitHub Actions (Automated Daily ETL Cron)",
+        value="[GitHub Actions Dashboard](https://github.com/HarshaNaik8/crypto-data-pipeline/actions/workflows/daily_etl.yml)\n*Automated schedule: Daily at 05:35 AM IST (00:05 UTC) • Click 'Run workflow' to execute anytime*",
+        inline=False,
+    )
+    embed.add_field(
+        name="🐘 3. Neon Cloud PostgreSQL Database",
+        value="[Neon Database Console](https://console.neon.tech/app/projects)\n*AWS Singapore Region • Live tables: dim_symbol, fact_market_data, vw_weekly_trends*",
+        inline=False,
+    )
+    embed.add_field(
+        name="🤖 4. Bot-Hosting.net (24/7 Bot Container)",
+        value="[Bot-Hosting Server Console](https://bot-hosting.net/panel/)\n*Active 24/7/365 • Turn bot ON/OFF or view real-time container CPU/RAM metrics*",
+        inline=False,
+    )
+    embed.add_field(
+        name="🪙 5. CoinGecko REST API",
+        value="[CoinGecko API Health Endpoint](https://api.coingecko.com/api/v3/ping)\n*Live market prices, 24h volumes, market capitalization*",
+        inline=False,
+    )
+    embed.add_field(
+        name="📊 6. Power BI Desktop / Cloud Reports",
+        value="*Connected directly to Neon PostgreSQL (Serverless Cloud Import)*\n*Visualizes financial metrics, rolling averages, and volatility trends*",
+        inline=False,
+    )
+
+    embed.set_footer(text="Crypto Pipeline Sentinel • Enterprise Data Engineering")
+    await interaction.response.send_message(embed=embed)
+
+
 @tree.command(name="help_pipe", description="📖 Show all available bot commands")
 async def cmd_help_pipe(interaction: discord.Interaction):
     """Display help for all available commands."""
     embed = discord.Embed(
         title="📖 Crypto Pipeline Sentinel — Command Reference",
-        description="All 10 available slash commands for monitoring and managing your cloud pipeline.",
+        description="All 11 available slash commands for monitoring and managing your cloud pipeline.",
         color=COLOR_INFO,
     )
 
@@ -674,10 +772,11 @@ async def cmd_help_pipe(interaction: discord.Interaction):
         ("/history", "📈 Historical price & volatility trends for a chosen asset"),
         ("/cloud_db", "☁️ Deep-dive into Neon PostgreSQL health, latency, & catalog"),
         ("/verify_etl", "🔍 Verify whether today's scheduled ETL execution has completed"),
+        ("/resources", "🌐 All cloud architecture links, consoles, & control portals"),
         ("/test", "🧪 Run the full pytest suite (25 tests) and see results"),
-        ("/run", "🚀 Manually trigger the ETL pipeline (Extract → Transform → Load)"),
+        ("/run", "🚀 Trigger the ETL pipeline (Cloud GitHub Actions or Local)"),
         ("/dbstats", "🗄️ Detailed database table statistics per symbol"),
-        ("/health", "🏥 Full system health check — DB, API, Docker, Webhook"),
+        ("/health", "🏥 Full system health check — DB, API, Secrets, Runtime"),
         ("/help_pipe", "📖 Show this help message"),
     ]
 

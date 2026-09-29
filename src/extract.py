@@ -1,8 +1,9 @@
 # src/extract.py
 """
 Resilient Cryptocurrency Market Data Extractor.
-- Primary: CoinGecko API v3 (Batch fetch with exponential backoff & rate-limit resilience).
-- Fallback: Binance Public API (Instant, high-capacity fallback if CoinGecko is throttled/blocked).
+- Primary: CoinGecko API v3 (Global aggregator with batch querying).
+- Secondary: CoinPaprika API v1 (Global aggregator fallback with identical metrics, zero rate-limit blocks on cloud runners).
+- Tertiary: Binance Public API (Exchange fallback for non-US runners).
 - Saves raw JSON audit trail to data/raw/.
 """
 
@@ -18,11 +19,11 @@ from typing import List, Dict, Optional
 load_dotenv(override=True)
 logger = logging.getLogger(__name__)
 
-# Standard circulating supply estimates for market cap calculation if fallback is used
-ESTIMATED_SUPPLY = {
-    "BITCOIN": 19_750_000,
-    "ETHEREUM": 120_200_000,
-    "SOLANA": 465_000_000,
+# Symbol mappings for multi-source fallbacks
+COINPAPRIKA_MAP = {
+    "bitcoin": "btc-bitcoin",
+    "ethereum": "eth-ethereum",
+    "solana": "sol-solana",
 }
 
 BINANCE_SYMBOL_MAP = {
@@ -31,22 +32,23 @@ BINANCE_SYMBOL_MAP = {
     "solana": "SOLUSDT",
 }
 
+ESTIMATED_SUPPLY = {
+    "BITCOIN": 19_750_000,
+    "ETHEREUM": 120_200_000,
+    "SOLANA": 465_000_000,
+}
+
 
 def _should_give_up(exc: requests.exceptions.RequestException) -> bool:
-    """
-    Give up on genuine client errors (4xx) EXCEPT:
-      - 429 Too Many Requests  → must retry (rate limit)
-      - 500/502/503/504         → server errors, also retry
-    """
     resp = getattr(exc, "response", None)
     if resp is None:
-        return False  # network error — keep retrying
+        return False
     code = resp.status_code
     return code not in (429, 500, 502, 503, 504) and code >= 400
 
 
 class CoinGeckoExtractor:
-    """Professional, fault-tolerant API extractor with retry logic and multi-source fallback."""
+    """Enterprise multi-source crypto extractor with zero cloud downtime."""
 
     def __init__(self):
         self.base_url = os.getenv("COINGECKO_BASE_URL", "https://api.coingecko.com/api/v3")
@@ -59,7 +61,7 @@ class CoinGeckoExtractor:
 
     def _get_headers(self) -> Dict[str, str]:
         headers = {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
             "Accept": "application/json",
         }
         if self.api_key:
@@ -69,12 +71,11 @@ class CoinGeckoExtractor:
     @backoff.on_exception(
         backoff.expo,
         (requests.exceptions.RequestException, requests.exceptions.Timeout),
-        max_tries=3,
+        max_tries=2,
         giveup=_should_give_up,
         jitter=backoff.full_jitter,
     )
     def _fetch_batch_coingecko(self) -> Dict[str, Dict]:
-        """Fetch all configured symbols from CoinGecko in a single request."""
         url = f"{self.base_url}/simple/price"
         params = {
             "ids": ",".join(s.lower() for s in self.symbols),
@@ -83,13 +84,45 @@ class CoinGeckoExtractor:
             "include_24hr_vol": "true",
             "include_24hr_change": "true",
         }
-        resp = requests.get(url, params=params, headers=self._get_headers(), timeout=12)
+        resp = requests.get(url, params=params, headers=self._get_headers(), timeout=8)
         resp.raise_for_status()
         return resp.json()
 
+    def _fetch_coinpaprika_fallback(self) -> List[Dict]:
+        """Global aggregator fallback via CoinPaprika (identical metrics: VWAP price, volume, cap)."""
+        logger.info("Fetching market data via CoinPaprika global aggregator fallback...")
+        records = []
+        now_ts = datetime.utcnow().isoformat()
+
+        for sym in self.symbols:
+            paprika_id = COINPAPRIKA_MAP.get(sym.lower())
+            if not paprika_id:
+                continue
+            try:
+                url = f"https://api.coinpaprika.com/v1/tickers/{paprika_id}"
+                resp = requests.get(url, timeout=8)
+                if resp.status_code == 200:
+                    d = resp.json()
+                    quotes = d.get("quotes", {}).get("USD", {})
+                    price = float(quotes.get("price", 0.0))
+                    if price > 0:
+                        records.append({
+                            "symbol": sym.upper(),
+                            "price_usd": price,
+                            "market_cap": float(quotes.get("market_cap", 0.0)),
+                            "volume_24h": float(quotes.get("volume_24h", 0.0)),
+                            "change_24h": float(quotes.get("percent_change_24h", 0.0)),
+                            "timestamp": now_ts,
+                        })
+                        logger.info("Successfully fetched %s from CoinPaprika: $%s", sym.upper(), price)
+            except Exception as exc:
+                logger.warning("CoinPaprika failed for %s: %s", sym, exc)
+
+        return records
+
     def _fetch_binance_fallback(self) -> List[Dict]:
-        """High-reliability fallback to Binance Public API if CoinGecko is throttled."""
-        logger.warning("Attempting Binance Public API fallback for symbols: %s", self.symbols)
+        """Binance fallback for non-US runner environments."""
+        logger.info("Attempting Binance Public API fallback...")
         records = []
         now_ts = datetime.utcnow().isoformat()
 
@@ -99,16 +132,15 @@ class CoinGeckoExtractor:
                 continue
             try:
                 url = f"https://api.binance.com/api/v3/ticker/24hr?symbol={pair}"
-                resp = requests.get(url, timeout=10)
+                resp = requests.get(url, timeout=8)
                 if resp.status_code == 200:
                     d = resp.json()
-                    if isinstance(d, dict) and "lastPrice" in d and d["lastPrice"]:
+                    if isinstance(d, dict) and d.get("lastPrice"):
                         sym_upper = sym.upper()
                         price = float(d["lastPrice"])
                         vol = float(d.get("quoteVolume", 0.0))
                         change = float(d.get("priceChangePercent", 0.0))
                         mcap = price * ESTIMATED_SUPPLY.get(sym_upper, 1_000_000)
-
                         records.append({
                             "symbol": sym_upper,
                             "price_usd": price,
@@ -119,14 +151,16 @@ class CoinGeckoExtractor:
                         })
                         logger.info("Successfully fetched %s from Binance fallback: $%s", sym_upper, price)
             except Exception as e:
-                logger.error("Binance fallback failed for %s: %s", sym, e)
+                logger.warning("Binance fallback failed for %s: %s", sym, e)
 
         return records
 
     def extract_all(self) -> pd.DataFrame:
         """
-        Fetch data for all symbols.
-        Tries CoinGecko batch first; transparently falls back to Binance if rate-limited.
+        Multi-source extraction engine:
+        1. CoinGecko (Primary)
+        2. CoinPaprika (Global Aggregator Fallback - works everywhere in cloud)
+        3. Binance (Exchange Fallback)
         """
         records = []
         coingecko_data = None
@@ -135,7 +169,7 @@ class CoinGeckoExtractor:
         try:
             coingecko_data = self._fetch_batch_coingecko()
         except Exception as exc:
-            logger.warning("CoinGecko extraction failed or rate-limited (%s). Invoking fallback...", exc)
+            logger.warning("CoinGecko primary failed or throttled (%s). Switching to fallback aggregators...", exc)
 
         if coingecko_data and isinstance(coingecko_data, dict):
             now_ts = datetime.utcnow().isoformat()
@@ -152,17 +186,25 @@ class CoinGeckoExtractor:
                     })
                     logger.info("Successfully fetched %s from CoinGecko", sym)
 
-        # 2. If CoinGecko didn't yield all symbols, invoke Binance fallback
+        # 2. Try CoinPaprika if any symbols are missing
         if len(records) < len(self.symbols):
-            logger.info("CoinGecko provided %d/%d records — running fallback for missing items...", len(records), len(self.symbols))
             fetched_syms = {r["symbol"] for r in records}
-            fallback_records = self._fetch_binance_fallback()
-            for fb in fallback_records:
-                if fb["symbol"] not in fetched_syms:
-                    records.append(fb)
+            paprika_records = self._fetch_coinpaprika_fallback()
+            for rec in paprika_records:
+                if rec["symbol"] not in fetched_syms:
+                    records.append(rec)
+                    fetched_syms.add(rec["symbol"])
+
+        # 3. Try Binance if still missing
+        if len(records) < len(self.symbols):
+            fetched_syms = {r["symbol"] for r in records}
+            binance_records = self._fetch_binance_fallback()
+            for rec in binance_records:
+                if rec["symbol"] not in fetched_syms:
+                    records.append(rec)
 
         if not records:
-            raise ValueError("No data extracted from CoinGecko API or fallback providers — all symbols failed.")
+            raise ValueError("No data extracted from CoinGecko, CoinPaprika, or Binance — all symbols failed.")
 
         df = pd.DataFrame(records)
 

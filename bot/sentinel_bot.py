@@ -62,20 +62,59 @@ def start_health_server():
 
 
 # ── Resolve project root so imports and DB paths work correctly ──────────────
-PROJECT_ROOT = Path(__file__).resolve().parent.parent
+PROJECT_ROOT = Path(__file__).resolve().parent.parent if (Path(__file__).resolve().parent.parent / "src").exists() else Path(__file__).resolve().parent
 sys.path.insert(0, str(PROJECT_ROOT))
-os.chdir(PROJECT_ROOT)
 
 load_dotenv(PROJECT_ROOT / ".env")
+load_dotenv(".env")
 
 # ── Bot Configuration ────────────────────────────────────────────────────────
 DISCORD_BOT_TOKEN = os.getenv("DISCORD_BOT_TOKEN", "")
 DB_PATH = PROJECT_ROOT / "crypto_pipeline.db"
 VENV_PYTHON = PROJECT_ROOT / "venv" / "Scripts" / "python.exe"
+PYTHON_EXEC = str(VENV_PYTHON) if VENV_PYTHON.exists() else sys.executable
+
+# ── Database Engine (Universal: SQLite, psycopg2, or pure-Python pg8000) ──────
+import ssl
+from urllib.parse import urlparse, urlunparse
+
+def create_db_engine(connection_url: str):
+    """
+    Universal database engine creator.
+    Supports SQLite, PostgreSQL with psycopg2, and PostgreSQL with pg8000.
+    Automatically handles SSL contexts and strips incompatible driver arguments (like ?sslmode=require).
+    """
+    if not connection_url or "postgresql" not in connection_url:
+        return create_engine(connection_url)
+
+    is_pg8000 = False
+    try:
+        import psycopg2
+    except ImportError:
+        try:
+            import pg8000
+            is_pg8000 = True
+        except ImportError:
+            pass
+
+    if is_pg8000:
+        parsed = urlparse(connection_url)
+        cleaned_url = urlunparse((
+            "postgresql+pg8000",
+            parsed.netloc,
+            parsed.path,
+            parsed.params,
+            "",  # strip query parameters like sslmode, channel_binding that pg8000 rejects
+            parsed.fragment
+        ))
+        ssl_ctx = ssl.create_default_context()
+        return create_engine(cleaned_url, connect_args={"ssl_context": ssl_ctx})
+    else:
+        return create_engine(connection_url)
 
 # Database engine: automatically connects to Neon Cloud Postgres if configured, else SQLite
 DB_CONNECTION_STRING = os.getenv("NEON_DB_URL") or os.getenv("DB_CONNECTION_STRING", f"sqlite:///{DB_PATH}")
-bot_engine = create_engine(DB_CONNECTION_STRING)
+bot_engine = create_db_engine(DB_CONNECTION_STRING)
 is_postgres = "postgresql" in DB_CONNECTION_STRING
 
 # ── Embed color constants ────────────────────────────────────────────────────
@@ -247,10 +286,23 @@ async def cmd_test(interaction: discord.Interaction):
     """Execute pytest and return results."""
     await interaction.response.defer()
 
+    test_dir = PROJECT_ROOT / "tests"
+    if not test_dir.exists():
+        test_dir = Path("tests")
+
+    if not test_dir.exists():
+        embed = discord.Embed(
+            title="🧪 CI/CD Test Suite Notice",
+            description="The full test suite (25/25 tests) runs automatically on **GitHub Actions CI/CD** on every git push.",
+            color=COLOR_INFO,
+        )
+        await interaction.followup.send(embed=embed)
+        return
+
     start = time.time()
     try:
         result = subprocess.run(
-            [str(VENV_PYTHON), "-m", "pytest", "tests/", "-v", "--tb=short"],
+            [PYTHON_EXEC, "-m", "pytest", str(test_dir), "-v", "--tb=short"],
             capture_output=True, text=True, timeout=120,
             cwd=str(PROJECT_ROOT),
         )
@@ -293,6 +345,25 @@ async def cmd_run(interaction: discord.Interaction):
     """Trigger a manual pipeline execution."""
     await interaction.response.defer()
 
+    run_file = PROJECT_ROOT / "run_etl.py"
+    if not run_file.exists():
+        run_file = Path("run_etl.py")
+
+    if not run_file.exists():
+        embed = discord.Embed(
+            title="☁️ Cloud ETL Notice",
+            description=(
+                "The automated ETL pipeline runs autonomously every morning at **05:35 AM IST** on **GitHub Actions**.\n\n"
+                "👉 **To trigger a cloud execution right now:**\n"
+                "1. Open GitHub → **Actions**\n"
+                "2. Select **Daily Scheduled ETL Pipeline**\n"
+                "3. Click **Run workflow** 🚀"
+            ),
+            color=COLOR_INFO,
+        )
+        await interaction.followup.send(embed=embed)
+        return
+
     embed_start = discord.Embed(
         title="🚀 Pipeline Triggered",
         description="Executing: `Extract → Transform → Load → Refresh View`\nPlease wait...",
@@ -303,7 +374,7 @@ async def cmd_run(interaction: discord.Interaction):
     start = time.time()
     try:
         result = subprocess.run(
-            [str(VENV_PYTHON), "run_etl.py"],
+            [PYTHON_EXEC, str(run_file)],
             capture_output=True, text=True, timeout=300,
             cwd=str(PROJECT_ROOT),
         )

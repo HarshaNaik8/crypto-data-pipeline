@@ -74,8 +74,7 @@ class DataTransformer:
                 return pd.DataFrame()
 
             with self.engine.connect() as conn:
-                hist_df = pd.read_sql(
-                    text("""
+                res = conn.execute(text("""
                     SELECT
                         d.symbol_code  AS symbol,
                         f.price_usd,
@@ -86,9 +85,8 @@ class DataTransformer:
                     FROM fact_market_data f
                     JOIN dim_symbol d ON f.symbol_id = d.symbol_id
                     ORDER BY f.record_timestamp
-                    """),
-                    conn,
-                )
+                """))
+                hist_df = pd.DataFrame(res.fetchall(), columns=res.keys())
 
             if hist_df.empty:
                 logger.info("No historical records in DB yet.")

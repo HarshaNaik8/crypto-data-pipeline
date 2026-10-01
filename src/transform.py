@@ -17,9 +17,9 @@ import numpy as np
 import pandas as pd
 from datetime import datetime
 from typing import Optional
-from sqlalchemy import create_engine, text, inspect
+from sqlalchemy import text, inspect
 
-from src.utils import get_db_path, safe_float
+from src.utils import get_db_path, safe_float, create_db_engine
 
 logger = logging.getLogger(__name__)
 
@@ -37,7 +37,8 @@ class DataTransformer:
         self.enriched_df: Optional[pd.DataFrame] = None
         self.connection_string = connection_string
         self.db_path = get_db_path(connection_string)
-        self.engine = create_engine(connection_string)
+        self.engine = create_db_engine(connection_string)
+
 
     # ── Validation ────────────────────────────────────────────────────────────
 

@@ -2,8 +2,10 @@
 
 import os
 import logging
-from sqlalchemy import create_engine, text
+from sqlalchemy import text
 from dotenv import load_dotenv
+
+from src.utils import create_db_engine
 
 load_dotenv()
 logger = logging.getLogger(__name__)
@@ -15,7 +17,8 @@ def create_weekly_aggregate_view(connection_string=None):
     Dialect-aware: supports both SQLite strftime() and PostgreSQL to_char().
     """
     conn_str = connection_string or os.getenv("NEON_DB_URL") or os.getenv("DB_CONNECTION_STRING", "sqlite:///crypto_pipeline.db")
-    engine = create_engine(conn_str)
+    engine = create_db_engine(conn_str)
+
     is_postgres = "postgresql" in conn_str
 
     week_expr = "to_char(record_timestamp::date, 'YYYY-WW')" if is_postgres else "strftime('%Y-%W', record_timestamp)"

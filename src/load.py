@@ -11,10 +11,10 @@ Database loader with:
 import os
 import logging
 import pandas as pd
-from sqlalchemy import create_engine, text
+from sqlalchemy import text
 from dotenv import load_dotenv
 
-from src.utils import get_db_path, safe_float
+from src.utils import get_db_path, safe_float, create_db_engine
 
 load_dotenv()
 logger = logging.getLogger(__name__)
@@ -31,8 +31,9 @@ class DatabaseLoader:
         )
         self.is_postgres = "postgresql" in self.connection_string
         self.db_path = get_db_path(self.connection_string)
-        self.engine = create_engine(self.connection_string)
+        self.engine = create_db_engine(self.connection_string)
         logger.info("DatabaseLoader connected to: %s (PostgreSQL=%s)", self.connection_string.split("@")[-1], self.is_postgres)
+
 
     # ── DDL ───────────────────────────────────────────────────────────────────
 

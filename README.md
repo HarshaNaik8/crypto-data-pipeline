@@ -1,99 +1,106 @@
-# 🚀 Production-Grade Real-Time Crypto Market Data Pipeline
+# 🚀 Enterprise Real-Time Crypto Data Pipeline & Observability Sentinel
 
 [![CI / Testing Pipeline](https://github.com/HarshaNaik8/crypto-data-pipeline/actions/workflows/ci.yml/badge.svg)](https://github.com/HarshaNaik8/crypto-data-pipeline/actions)
-[![Python](https://img.shields.io/badge/Python-3.11-3776AB?style=flat&logo=python&logoColor=white)](https://www.python.org/)
-[![Database](https://img.shields.io/badge/SQLite-Star--Schema-003B57?style=flat&logo=sqlite&logoColor=white)](https://www.sqlite.org/)
+[![Daily Cloud ETL](https://github.com/HarshaNaik8/crypto-data-pipeline/actions/workflows/daily_etl.yml/badge.svg)](https://github.com/HarshaNaik8/crypto-data-pipeline/actions/workflows/daily_etl.yml)
+[![Python](https://img.shields.io/badge/Python-3.11%20%7C%203.14-3776AB?style=flat&logo=python&logoColor=white)](https://www.python.org/)
+[![Cloud Database](https://img.shields.io/badge/Neon_PostgreSQL-Serverless_AWS-00E599?style=flat&logo=postgresql&logoColor=white)](https://neon.tech/)
 [![Testing](https://img.shields.io/badge/Tests-25%2F25%20Passing-brightgreen?style=flat&logo=pytest&logoColor=white)](https://docs.pytest.org/)
-[![Docker](https://img.shields.io/badge/Docker-Ready-2496ED?style=flat&logo=docker&logoColor=white)](https://www.docker.com/)
-[![Alerts](https://img.shields.io/badge/Discord-Alerting_Active-5865F2?style=flat&logo=discord&logoColor=white)](https://discord.com/)
-[![Power BI](https://img.shields.io/badge/Power_BI-ODBC_Direct-F2C811?style=flat&logo=powerbi&logoColor=black)](https://powerbi.microsoft.com/)
+[![24/7 Bot Sentinel](https://img.shields.io/badge/Discord_Bot-24%2F7_Cloud_Container-5865F2?style=flat&logo=discord&logoColor=white)](https://discord.com/)
+[![Power BI](https://img.shields.io/badge/Power_BI-Direct_Warehouse_BI-F2C811?style=flat&logo=powerbi&logoColor=black)](https://powerbi.microsoft.com/)
 [![License](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 
-An enterprise-ready, end-to-end data engineering pipeline that automatically extracts, validates, transforms, stores, and visualizes live cryptocurrency market data (Bitcoin, Ethereum, Solana). Designed with financial engineering principles, idempotency, database-level integrity, resilience against API rate-limiting, automated orchestration, and interactive business intelligence reporting.
+An enterprise-grade, end-to-end cloud data engineering platform that automatically extracts, validates, feature-engineers, stores, monitors, and visualizes live cryptocurrency market data (Bitcoin, Ethereum, Solana).
+
+Engineered for **100% autonomous cloud operation** ($0/month budget, zero credit cards needed), featuring a **3-tier resilient API extraction engine**, **in-place PostgreSQL/Neon UPSERTs**, **automated daily GitHub Actions cloud execution**, an **always-on 24/7 Discord Sentinel Bot** with 11 slash commands, and an **interactive Power BI Business Intelligence suite**.
 
 ---
 
-## 🏗️ 1. Architecture Flow
+## 🏗️ 1. End-to-End System Architecture
 
 ```mermaid
 flowchart TD
-    subgraph Ingestion ["1. Data Ingestion (Extract)"]
-        CG[CoinGecko REST API] -->|GET /simple/price<br/>Backoff & 429 Jitter Retry| EXT[src/extract.py]
-        EXT -->|Raw JSON Audit Trail| RAW[(data/raw/raw_YYYYMMDD_HHMM.json)]
+    subgraph Ingestion ["1. Multi-Tier Resilient Ingestion (Extract)"]
+        CG["Tier 1: CoinGecko API v3<br/>(Batch Price, Cap, 24h Vol)"] -->|403/429 CloudBlock| CP["Tier 2: CoinPaprika API v1<br/>(Global VWAP, Zero Geo-Blocks)"]
+        CP -->|Fallback| BN["Tier 3: Binance Spot API<br/>(Exchange Order Book)"]
+        CG --> EXT[src/extract.py]
+        CP --> EXT
+        BN --> EXT
+        EXT --> RAW[(data/raw/raw_YYYYMMDD_HHMM.json)]
     end
 
-    subgraph Transformation ["2. Feature Engineering (Transform)"]
+    subgraph Transformation ["2. Financial Feature Engineering (Transform)"]
         EXT --> TRF[src/transform.py]
-        DB_HIST[(fact_market_data)] -.->|Load Historical Context| TRF
-        TRF -->|Rolling 7d/30d Avg, Daily Return, 7d Volatility| ENR[Enriched Features]
-        ENR -->|Parquet Audit Archive| PRQ[(data/transformed/*.parquet)]
-        ENR -->|Filter to Current Day Records| LOAD_READY[Clean Transformed Delta]
+        DB_HIST[(Historical Market Data)] -.->|Load Past Context| TRF
+        TRF -->|Calculate Rolling 7d/30d Avg, Daily Return, Volatility| ENR[Enriched Feature Set]
+        ENR --> PRQ[(data/transformed/*.parquet)]
+        ENR --> LOAD_READY[Clean Current-Day Delta]
     end
 
-    subgraph Storage ["3. Data Warehousing (Load)"]
+    subgraph Storage ["3. Cloud Data Warehouse (Load)"]
         LOAD_READY --> LOAD[src/load.py]
         LOAD -->|"Dynamic Dim Key Lookup"| DIM[(dim_symbol)]
-        LOAD -->|"Atomic INSERT OR REPLACE<br/>UNIQUE Constraint Guard"| FACT[(fact_market_data)]
-        FACT -->|"DDL View Creation"| VIEW[(vw_weekly_trends)]
+        LOAD -->|"True In-Place UPSERT<br/>ON CONFLICT DO UPDATE"| FACT[(fact_market_data)]
+        FACT -->|"Dialect-Aware DDL View"| VIEW[(vw_weekly_trends)]
+        DB_TARGET{{"Storage Target"}}
+        LOAD --> DB_TARGET
+        DB_TARGET -->|"Cloud Primary"| NEON[("Neon Serverless PostgreSQL<br/>(AWS Singapore)")]
+        DB_TARGET -->|"Local Fallback"| SQLITE[("Local SQLite3 Engine<br/>crypto_pipeline.db")]
     end
 
-    subgraph Orchestration ["4. Orchestration & Scheduling"]
-        WTS["Windows Task Scheduler<br/>Daily 11:00 AM"] --> RUN_BAT[run_pipeline.bat]
-        RUN_BAT --> RUN_ETL[run_etl.py]
-        RUN_ETL --> pipeline[pipeline.py]
+    subgraph Orchestration ["4. Autonomous Cloud Orchestration"]
+        CRON["GitHub Actions Cron<br/>00:05 UTC (05:35 AM IST)"] --> GHA[daily_etl.yml Runner]
+        GHA --> RUN_ETL[run_etl.py]
+        RUN_ETL --> PIPE[pipeline.py]
+        LOCAL_TASK["Windows Task Scheduler<br/>(Optional Local Runner)"] -.-> RUN_ETL
     end
 
-    subgraph BI ["5. Analytics & Dashboard"]
-        VIEW -.->|"ODBC DSN: CryptoDB"| PBI["Power BI Desktop / Dashboard"]
-        FACT -.->|"Star Schema (1:*)"| PBI
-        DIM -.->|"Dimension Filtering"| PBI
+    subgraph Observability ["5. 24/7 Cloud Sentinel Bot & Alerting"]
+        PIPE -->|Webhook Heartbeat / Incident Alert| HOOK[Discord Channel #general]
+        BOT_HOST["bot-hosting.net<br/>Isolated Linux Container"] --> BOT[bot/sentinel_bot.py]
+        BOT -->|11 Slash Commands| DISCORD[Discord App / Server]
+        DISCORD -->|/health, /cloud_db, /verify_etl, /run, /resources| BOT
+        BOT -.->|"pg8000 + SSL"| NEON
+    end
+
+    subgraph BI ["6. Interactive Business Intelligence"]
+        FACT -.->|"Direct DB Connection / ODBC DSN"| PBI["Power BI Desktop / Dashboard"]
+        DIM -.->|"Star Schema (1:N Single Direction)"| PBI
+        VIEW -.->|"Aggregated Trends & Visuals"| PBI
     end
 ```
 
 ---
 
-## 🎯 2. Business Value & Financial Engineering
+## 🎯 2. Financial Feature Engineering & Formulas
 
-In institutional investment environments (e.g., Goldman Sachs, Morgan Stanley), decision-makers depend on reliable real-time and historical price series to evaluate market volatility, assess risk-adjusted returns, and rebalance assets. 
+In institutional quantitative finance, decision-makers rely on continuous time-series metrics to measure momentum, assess downside risk, and dynamically adjust portfolio weights.
 
-### Engineered Financial Metrics
+### Mathematical Formulations
 
-1. **Daily Return ($R_t$)**:
+1. **Daily Percentage Return ($R_t$)**:
+   $$\text{Daily Return}_t = \left(\frac{P_t - P_{t-1}}{P_{t-1}}\right) \times 100$$
+   *Measures the exact percentage price change of the asset between consecutive days.*
 
-$$
-\text{Daily Return}_t = \left(\frac{P_t - P_{t-1}}{P_{t-1}}\right) \times 100
-$$
-
-*Captures percentage asset movement between consecutive trading periods.*
-
-2. **Rolling Moving Averages (7-Day & 30-Day)**:
-
-$$
-\text{SMA}_{k,t} = \frac{1}{k}\sum_{i=0}^{k-1} P_{t-i} \quad \text{for } k \in \{7, 30\}
-$$
-
-*Smooths short-term price noise to highlight intermediate and monthly momentum.*
+2. **Simple Moving Averages (7-Day & 30-Day)**:
+   $$\text{SMA}_{k,t} = \frac{1}{k}\sum_{i=0}^{k-1} P_{t-i} \quad \text{for } k \in \{7, 30\}$$
+   *Filters out high-frequency market noise to reveal underlying intermediate and monthly price trends.*
 
 3. **7-Day Rolling Volatility ($\sigma_{7d}$)**:
-
-$$
-\sigma_{7d} = \sqrt{\frac{1}{n-1} \sum_{i=1}^{n} (R_i - \bar{R})^2} \quad \text{over 7-day rolling window}
-$$
-
-*Quantifies asset price turbulence and risk exposure.*
+   $$\sigma_{7d} = \sqrt{\frac{1}{n-1} \sum_{i=1}^{n} (R_i - \bar{R})^2} \quad \text{over 7-day rolling window}$$
+   *Quantifies historical asset turbulence and market volatility exposure.*
 
 ---
 
-## 🗄️ 3. Data Warehouse Architecture (Star Schema)
+## 🗄️ 3. Star-Schema Dimensional Modeling
 
-The analytical store implements a dimensional model with explicit primary/foreign keys, database-level uniqueness, index optimization, and IEEE floating-point precision:
+The warehouse uses a dimensional star schema optimized for analytical query performance, strict referential integrity, and seamless reporting across PostgreSQL and SQLite:
 
 ```
            ┌────────────────────────────┐
            │         dim_symbol         │
            ├────────────────────────────┤
-           │ symbol_id (PK, AUTOINC)    │◄───────────┐
-           │ symbol_code (VARCHAR, UNQ) │            │ (1:N)
+           │ symbol_id (PK, SERIAL)     │◄───────────┐
+           │ symbol_code (VARCHAR, UNQ) │            │ (1:N Cardinality)
            │ asset_name (VARCHAR)       │            │
            │ asset_type (VARCHAR)       │            │
            └────────────────────────────┘            │
@@ -101,22 +108,22 @@ The analytical store implements a dimensional model with explicit primary/foreig
            ┌────────────────────────────┐            │
            │      fact_market_data      │            │
            ├────────────────────────────┤            │
-           │ fact_id (PK, AUTOINC)      │            │
+           │ fact_id (PK, SERIAL)       │            │
            │ symbol_id (FK)             │────────────┘
-           │ price_usd (REAL)           │
-           │ market_cap (REAL)          │
-           │ volume_24h (REAL)          │
-           │ change_24h (REAL)          │
-           │ rolling_avg_7d (REAL)      │
-           │ rolling_avg_30d (REAL)     │
-           │ daily_return (REAL)        │
-           │ volatility_7d (REAL)       │
-           │ record_timestamp (TEXT)    │
+           │ price_usd (DOUBLE PREC)    │
+           │ market_cap (DOUBLE PREC)   │
+           │ volume_24h (DOUBLE PREC)   │
+           │ change_24h (DOUBLE PREC)   │
+           │ rolling_avg_7d (DOUBLE)    │
+           │ rolling_avg_30d (DOUBLE)   │
+           │ daily_return (DOUBLE PREC) │
+           │ volatility_7d (DOUBLE PREC)│
+           │ record_timestamp (VARCHAR) │
            ├────────────────────────────┤
            │ UNIQUE(symbol_id, timestamp│
            └────────────────────────────┘
-                         │
-                         ▼ (Aggregated View)
+                          │
+                          ▼ (Analytical Materialized View)
            ┌────────────────────────────┐
            │      vw_weekly_trends      │
            ├────────────────────────────┤
@@ -129,106 +136,147 @@ The analytical store implements a dimensional model with explicit primary/foreig
            └────────────────────────────┘
 ```
 
-### Table Definitions & Schema DDL
+### In-Place Idempotent UPSERT (`ON CONFLICT DO UPDATE`)
+
+To prevent duplicate entries and avoid auto-increment primary key jumps caused by `DELETE + INSERT` semantics, the pipeline executes a **True In-Place UPSERT**:
 
 ```sql
--- Dimension: dim_symbol
-CREATE TABLE dim_symbol (
-    symbol_id   INTEGER PRIMARY KEY AUTOINCREMENT,
-    symbol_code VARCHAR(10) UNIQUE NOT NULL,
-    asset_name  VARCHAR(50),
-    asset_type  VARCHAR(20) DEFAULT 'crypto'
-);
-
--- Fact: fact_market_data
-CREATE TABLE fact_market_data (
-    fact_id          INTEGER PRIMARY KEY AUTOINCREMENT,
-    symbol_id        INTEGER NOT NULL,
-    price_usd        REAL,
-    market_cap       REAL,
-    volume_24h       REAL,
-    change_24h       REAL,
-    rolling_avg_7d   REAL,
-    rolling_avg_30d  REAL,
-    daily_return     REAL,
-    volatility_7d    REAL,
-    record_timestamp TEXT NOT NULL,
-    UNIQUE (symbol_id, record_timestamp),
-    FOREIGN KEY (symbol_id) REFERENCES dim_symbol(symbol_id)
-);
-
-CREATE UNIQUE INDEX idx_symbol_date ON fact_market_data(symbol_id, record_timestamp);
-CREATE INDEX idx_timestamp ON fact_market_data(record_timestamp);
-CREATE INDEX idx_symbol_id ON fact_market_data(symbol_id);
+INSERT INTO fact_market_data (
+    symbol_id, price_usd, market_cap, volume_24h, change_24h,
+    rolling_avg_7d, rolling_avg_30d, daily_return, volatility_7d, record_timestamp
+) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+ON CONFLICT (symbol_id, record_timestamp) 
+DO UPDATE SET
+    price_usd       = EXCLUDED.price_usd,
+    market_cap      = EXCLUDED.market_cap,
+    volume_24h      = EXCLUDED.volume_24h,
+    change_24h      = EXCLUDED.change_24h,
+    rolling_avg_7d  = EXCLUDED.rolling_avg_7d,
+    rolling_avg_30d = EXCLUDED.rolling_avg_30d,
+    daily_return    = EXCLUDED.daily_return,
+    volatility_7d   = EXCLUDED.volatility_7d;
 ```
 
 ---
 
-## ⚡ 4. Engineering Highlights & Hardening
+## 🌐 4. Cloud Infrastructure & Multi-Driver Database Engine
 
-| Feature | Child/Script Implementation | Production-Grade Implementation |
+### Universal Database Engine (`create_db_engine`)
+The pipeline runs seamlessly across local developer workstations, GitHub Actions runners, and containerized Linux environments through an intelligent auto-negotiation engine in `src/utils.py`:
+
+- **Psycopg 3 (`psycopg[binary]`)**: Modern official driver for Python 3.11–3.14+ with C binary extensions.
+- **Psycopg 2 (`psycopg2-binary`)**: Legacy production adapter.
+- **pg8000 (`pg8000`)**: Pure-Python PostgreSQL driver with custom SSL context (used on lightweight container hosts where C compilers are unavailable).
+- **SQLite3**: Fully embedded offline database engine.
+
+```python
+from src.utils import create_db_engine
+# Auto-negotiates the optimal driver without manual dialect conversions
+engine = create_db_engine(os.getenv("NEON_DB_URL"))
+```
+
+---
+
+## 🤖 5. 24/7 Discord Sentinel Bot (`bot/sentinel_bot.py`)
+
+Hosted 24/7 on an isolated Linux cloud container (`bot-hosting.net`), the Sentinel Bot acts as a dedicated Command & Control Center for data pipeline observability.
+
+### Complete Slash Commands Suite (11 Commands)
+
+| Command | Category | Description |
 |---|---|---|
-| **Rate Limit Handling** | Crashes or exits on HTTP 429 | Exponential backoff + full jitter, specifically distinguishing 429 & 5xx from true 4xx client errors |
-| **Idempotency** | Application-level `SELECT` checks | Native database-level `UNIQUE(symbol_id, record_timestamp)` + atomic `INSERT OR REPLACE` |
-| **Symbol Resolution** | Hardcoded dictionaries (`{'BITCOIN': 1}`) | Dynamic metadata queries against `dim_symbol` |
-| **Historical Calculations** | Inaccurate rolling stats without past data | Pre-fetches past DB context before window calculations; returns only delta to warehouse loader |
-| **Data Types** | Implicit SQLite dynamic typing (rounding issues in BI) | Explicit `REAL` schemas with type-safe `safe_float()` casting |
-| **Batch Runner** | Interactive `pause` statements locking background tasks | Silent execution with exit code propagation (`exit /b %ERRORLEVEL%`) |
-| **Testing** | Manual inspection | Automated Pytest test suite covering mock extractions, edge cases, and schema constraints |
+| `/health` | **Diagnostics** | Real-time full-stack health report (Neon DB status, Python 3.14 runtime, API reachability, container telemetry). |
+| `/cloud_db` | **Database** | Live Neon PostgreSQL connection telemetry, round-trip latency (ms), storage usage, and row counts. |
+| `/verify_etl` | **Audit** | Verifies if today's ETL execution successfully populated records in Neon PostgreSQL. |
+| `/resources` | **Navigation** | Centralized project directory linking to Neon Console, GitHub Actions, Discord Server, and APIs. |
+| `/run` | **Execution** | Dispatches an immediate remote execution of the GitHub Actions Cloud ETL workflow via GitHub REST API. |
+| `/status` | **Monitoring** | Pipeline health, latest batch execution timestamps, and failure incident telemetry. |
+| `/refresh_views` | **Analytics** | Re-computes and refreshes the analytical view `vw_weekly_trends` across all historical data. |
+| `/pipeline_summary` | **Statistics** | High-level summary of all tracked symbols, aggregate row counts, and date ranges. |
+| `/export_parquet` | **Backup** | Exports fact tables into compressed Apache Parquet audit archives. |
+| `/test` | **Quality** | Runs local unit test verification suite guidelines and diagnostic tests. |
+| `/help` | **Manual** | Interactive documentation guide explaining all commands and architecture details. |
 
 ---
 
-## 📁 5. Repository Structure
+## ⏰ 6. Cloud Automation & Scheduling
 
-```
-crypto-pipeline/
-├── src/
-│   ├── __init__.py
-│   ├── extract.py          # Resilient API extractor with backoff retry
-│   ├── transform.py        # Context-aware financial feature engineering
-│   ├── load.py             # Atomic database loader with star-schema enforcement
-│   ├── weekly_aggregate.py # SQL view generator for aggregated trends
-│   └── utils.py            # Centralized UTF-8 logging, DB helpers, and float casters
-├── scripts/
-│   ├── backfill_market_data.py          # OHLCV market chart backfill utility
-│   └── migrate_add_unique_constraint.py # One-time DDL table migration script
-├── tests/
-│   ├── __init__.py
-│   ├── test_extract.py     # 10 tests for backoff logic, retry behavior, response schemas
-│   └── test_transform.py   # 10 tests for calculations, idempotency, and constraints
-├── data/                   # (Gitignored) Raw JSON and transformed Parquet snapshots
-├── logs/                   # (Gitignored) UTF-8 pipeline execution logs
-├── pipeline.py             # Core ETL orchestrator function
-├── run_etl.py              # Task Scheduler execution entry point
-├── run_pipeline.bat        # Automated Windows batch execution script
-├── crypto_pipeline.db      # SQLite database file (Star Schema)
-├── crypto_dash.pbix        # Power BI interactive business dashboard
-├── requirements.txt        # Pinned Python dependencies
-├── .env.example            # Environment variables configuration template
-├── .gitignore              # Production git exclusions
-├── LICENSE                 # MIT License
-└── README.md               # Complete project documentation
+The cloud pipeline is configured to execute daily at **00:05 UTC (05:35 AM IST)** via GitHub Actions:
+- **Optimal Crypto Market Timing:** Global cryptocurrency daily bars close at **00:00 UTC**. Running at 00:05 UTC ensures the final daily closing prices, daily returns, and trading volumes are 100% captured without missing volatility.
+- **Zero Laptop Dependency:** Completely automated in the cloud without requiring a local machine to be turned on.
+
+```yaml
+# .github/workflows/daily_etl.yml
+name: Daily Scheduled ETL Pipeline
+on:
+  schedule:
+    - cron: '5 0 * * *'  # 00:05 UTC = 05:35 AM IST
+  workflow_dispatch:      # 1-click on-demand manual trigger
 ```
 
 ---
 
-## 🛠️ 6. Quickstart & Installation
+## 📊 7. Power BI Business Intelligence & Reporting
+
+The warehouse is connected directly to **Microsoft Power BI Desktop** (`crypto_dash.pbix`) for executive reporting.
+
+### Model View (Star Schema)
+- `dim_symbol[symbol_id]` $\xrightarrow{1:N}$ `fact_market_data[symbol_id]`
+  - **Cardinality:** 1 to Many (`1:*`)
+  - **Cross filter direction:** Single (`dim_symbol` filters `fact_market_data`)
+- `vw_weekly_trends`: Standalone aggregated analytical view.
+
+### Recommended Visualizations
+1. **Executive KPI Cards**:
+   - `Latest Price`: `SELECTEDVALUE(fact_market_data[price_usd])` formatted as `$#,##0.00`
+   - `24h Return`: `SELECTEDVALUE(fact_market_data[change_24h])` with dynamic conditional color formatting (Green for $\ge 0$, Red for $< 0$)
+   - `7d Volatility`: `SELECTEDVALUE(fact_market_data[volatility_7d])` formatted as `0.00%`
+2. **Asset Slicer**:
+   - Tile or pill slicer for `dim_symbol[symbol_code]` (BTC, ETH, SOL).
+3. **Price & Rolling Averages Line Chart**:
+   - **X-Axis:** `record_timestamp`
+   - **Y-Axis:** `price_usd`, `rolling_avg_7d`, `rolling_avg_30d`
+4. **Weekly Market Overview Table**:
+   - Aggregated metrics from `vw_weekly_trends`: `year_week`, `avg_price`, `avg_volume`, `price_range`, `record_count`.
+
+---
+
+## 🧪 8. Automated Testing Suite (25 Tests Passing)
+
+All modules are strictly tested with automated mock fixtures covering API rate limiting (HTTP 429), exponential jitter backoffs, server error retries (500/503), schema integrity, and Discord alert payloads:
+
+```bash
+$ pytest tests/ -v
+============================= test session starts =============================
+platform win32 -- Python 3.11.9, pytest-7.4.0, pluggy-1.6.0
+collected 25 items
+
+tests/test_alerts.py .....                                               [ 20%]
+tests/test_extract.py ..........                                         [ 60%]
+tests/test_transform.py ..........                                       [100%]
+
+============================= 25 passed in 3.37s ==============================
+```
+
+---
+
+## 🛠️ 9. Quickstart & Installation Guide
 
 ### Prerequisites
 - Python 3.11+
-- Windows 10/11 (for Windows Task Scheduler) or Linux/macOS (cron)
-- Power BI Desktop (for dashboard) + SQLite ODBC Driver (64-bit)
+- Git
+- Neon PostgreSQL Account (or local SQLite)
 
-### 1. Clone & Create Virtual Environment
+### 1. Clone & Setup Virtual Environment
 ```bash
 git clone https://github.com/HarshaNaik8/crypto-data-pipeline.git
 cd crypto-data-pipeline
 
 python -m venv venv
-# On Windows PowerShell:
-.\venv\Scripts\Activate.ps1
-# On Windows Command Prompt:
-venv\Scripts\activate.bat
+# Windows:
+.\venv\Scripts\activate
+# Linux/macOS:
+source venv/bin/activate
 ```
 
 ### 2. Install Dependencies
@@ -236,157 +284,29 @@ venv\Scripts\activate.bat
 pip install -r requirements.txt
 ```
 
-### 3. Configure Environment Variables
-```bash
-cp .env.example .env
-```
-Default configuration:
+### 3. Configure Environment (`.env`)
 ```ini
+# Core Configuration
 COINGECKO_BASE_URL=https://api.coingecko.com/api/v3
 SYMBOLS=bitcoin,ethereum,solana
-DB_CONNECTION_STRING=sqlite:///crypto_pipeline.db
 LOG_LEVEL=INFO
+
+# Cloud Database (Neon PostgreSQL)
+NEON_DB_URL=postgresql+psycopg://user:password@endpoint.neon.tech/crypto_db?sslmode=require
+
+# Observability
+DISCORD_WEBHOOK_URL=https://discord.com/api/webhooks/your-webhook-id/your-webhook-token
+DISCORD_BOT_TOKEN=your-bot-token
 ```
 
-### 4. Run Automated Test Suite
-Ensure all 20 tests pass before running or scheduling:
+### 4. Execute Pipeline Locally
 ```bash
-pytest tests/ -v
+python run_etl.py
 ```
 
----
-
-## ⏰ 7. Automated Orchestration (Windows Task Scheduler)
-
-The pipeline is designed to be triggered autonomously via Windows Task Scheduler.
-
-1. Open **Task Scheduler** (`taskschd.msc`) on Windows.
-2. Click **Create Task...** (not Basic Task) in the Actions pane:
-   - **General Tab**:
-     - Name: `CryptoDataPipeline`
-     - Select: *Run whether user is logged on or not* (or *Run only when user is logged on*).
-     - Check: *Run with highest privileges*.
-   - **Triggers Tab**:
-     - Click **New...**
-     - Begin the task: *On a schedule*
-     - Settings: **Daily**, Start at **11:00:00 AM**, Recur every **1** day.
-   - **Actions Tab**:
-     - Action: *Start a program*
-     - Program/script: `C:\path\to\crypto-pipeline\run_pipeline.bat`
-     - Start in: `C:\path\to\crypto-pipeline`
-   - **Settings Tab**:
-     - ✅ Check: *Run task as soon as possible after a scheduled start is missed* (Ensures catch-up if computer is powered off at 11:00 AM).
-     - ✅ Check: *If the task fails, restart every: 10 minutes, Attempt to restart up to: 3 times*.
-     - ✅ Check: *Allow task to be run on demand*.
-
----
-
-## 📊 8. Business Intelligence: Power BI vs Tableau
-
-### Why Power BI is the Best Choice for this Pipeline
-
-| Feature | Microsoft Power BI (Recommended) | Tableau Desktop |
-|---|---|---|
-| **Direct SQLite Connection** | Native System DSN ODBC integration works seamlessly with direct refresh. | Requires custom JDBC or extracts; slower on embedded SQLite. |
-| **Dimensional Modeling** | Full Star-Schema relationship engine (`1:*` cardinality, single-direction cross-filtering). | Requires physical/logical layer relationship mappings or joins. |
-| **Financial Calculations** | DAX offers optimized time-intelligence and moving aggregations. | Table calculations and Level of Detail (LOD) can be rigid. |
-| **Cost & Deployment** | Free Power BI Desktop; simple `.pbix` portability in Git repositories. | Expensive commercial licensing; `.twbx` packaging issues. |
-
----
-
-## 📈 9. Step-by-Step BI Connection & Dashboard Setup
-
-### Step 1: Create Windows ODBC System DSN
-1. Download and install the official **SQLite3 ODBC Driver (64-bit)** (e.g., `sqliteodbc_w64.exe`).
-2. Press `Win + R`, type `odbcad32.exe`, and select the **System DSN** tab.
-3. Click **Add...** → Select **SQLite3 ODBC Driver** → Click **Finish**.
-4. Configure DSN:
-   - **Data Source Name:** `CryptoDB`
-   - **Database Name:** Browse and select `C:\path\to\crypto-pipeline\crypto_pipeline.db`
-   - Leave options default and click **OK**.
-
-### Step 2: Import into Power BI Desktop
-1. Open **Power BI Desktop**.
-2. Click **Get Data** → **ODBC** → Click **Connect**.
-3. Select **DSN:** `CryptoDB`.
-4. In the Navigator dialog, check:
-   - `dim_symbol`
-   - `fact_market_data`
-   - `vw_weekly_trends`
-5. Click **Load**.
-
-### Step 3: Configure Star Schema Relationships
-Navigate to the **Model View** tab in Power BI:
-1. Connect `dim_symbol[symbol_id]` $\rightarrow$ `fact_market_data[symbol_id]`:
-   - **Cardinality:** `1 to Many (1:*)`
-   - **Cross filter direction:** `Single (dim_symbol filters fact_market_data)`
-2. Ensure `vw_weekly_trends` is kept as a **standalone table** (Do not link it to fact table to avoid cyclic evaluation warnings).
-
-### Step 4: Recommended Dashboard Visuals
-- **Executive KPI Cards**:
-  - Latest Price: `SELECTEDVALUE(fact_market_data[price_usd])`
-  - 24h Price Change: `SELECTEDVALUE(fact_market_data[change_24h])`
-  - 7-Day Volatility: `SELECTEDVALUE(fact_market_data[volatility_7d])`
-- **Asset Slicer**:
-  - Drop `dim_symbol[symbol_code]` (Bitcoin, Ethereum, Solana) into a button or dropdown slicer.
-- **Price Trend Visual (Line Chart)**:
-  - **X-Axis:** `fact_market_data[record_timestamp]`
-  - **Y-Axis:** `price_usd`, `rolling_avg_7d`, `rolling_avg_30d`
-- **Weekly Overview (Table/Matrix)**:
-  - Display from `vw_weekly_trends`: `year_week`, `avg_price`, `avg_volume`, `price_range`.
-
----
-
-## 🧪 10. Automated Testing Suite & CI/CD
-
-The repository contains 25 comprehensive unit and integration tests located in `tests/`, automatically validated via GitHub Actions CI on every commit:
-
+### 5. Launch Discord Sentinel Bot Locally (or via bot-hosting.net)
 ```bash
-$ pytest tests/ -v
-============================= test session starts =============================
-tests/test_alerts.py::TestDiscordAlerts::test_webhook_skipped_when_url_missing PASSED [  4%]
-tests/test_alerts.py::TestDiscordAlerts::test_webhook_successful_delivery PASSED [  8%]
-tests/test_alerts.py::TestDiscordAlerts::test_webhook_handles_network_exception_gracefully PASSED [ 12%]
-tests/test_alerts.py::TestDiscordAlerts::test_notify_success_embed_structure PASSED [ 16%]
-tests/test_alerts.py::TestDiscordAlerts::test_notify_failure_embed_structure PASSED [ 20%]
-tests/test_extract.py::TestShouldGiveUp::test_gives_up_on_400 PASSED     [ 24%]
-tests/test_extract.py::TestShouldGiveUp::test_gives_up_on_403 PASSED     [ 28%]
-tests/test_extract.py::TestShouldGiveUp::test_retries_on_429 PASSED      [ 32%]
-tests/test_extract.py::TestShouldGiveUp::test_retries_on_500 PASSED      [ 36%]
-tests/test_extract.py::TestShouldGiveUp::test_retries_on_503 PASSED      [ 40%]
-tests/test_extract.py::TestShouldGiveUp::test_retries_on_network_error PASSED [ 44%]
-tests/test_extract.py::TestCoinGeckoExtractor::test_extract_all_returns_dataframe PASSED [ 48%]
-tests/test_extract.py::TestCoinGeckoExtractor::test_extract_all_has_required_columns PASSED [ 52%]
-tests/test_extract.py::TestCoinGeckoExtractor::test_symbol_is_uppercased PASSED [ 56%]
-tests/test_extract.py::TestCoinGeckoExtractor::test_all_symbols_fail_raises PASSED [ 60%]
-tests/test_transform.py::TestDataTransformer::test_basic_transform_returns_dataframe PASSED [ 64%]
-tests/test_transform.py::TestDataTransformer::test_output_has_required_columns PASSED [ 68%]
-tests/test_transform.py::TestDataTransformer::test_daily_return_is_nonzero_after_first_row PASSED [ 72%]
-tests/test_transform.py::TestDataTransformer::test_no_negative_volatility PASSED [ 76%]
-tests/test_transform.py::TestDataTransformer::test_empty_dataframe_raises PASSED [ 80%]
-tests/test_transform.py::TestDataTransformer::test_symbol_upper_cased PASSED [ 84%]
-tests/test_transform.py::TestDataTransformer::test_no_nan_in_critical_columns PASSED [ 88%]
-tests/test_transform.py::TestLoadTransformIntegration::test_load_inserts_rows PASSED [ 92%]
-tests/test_transform.py::TestLoadTransformIntegration::test_upsert_no_duplicates PASSED [ 96%]
-tests/test_transform.py::TestLoadTransformIntegration::test_fact_has_unique_constraint PASSED [100%]
-
-============================= 25 passed in 6.21s ==============================
-```
-
----
-
-## 🐳 11. Containerization (Docker & Docker Compose)
-
-The pipeline is fully containerized to guarantee environment reproducibility across any OS:
-
-```bash
-# Build and run the entire pipeline container with Docker Compose
-docker compose up --build
-```
-Or run with native Docker CLI:
-```bash
-docker build -t crypto-pipeline:latest .
-docker run --env-file .env -v $(pwd)/crypto_pipeline.db:/app/crypto_pipeline.db crypto-pipeline:latest
+python bot/sentinel_bot.py
 ```
 
 ---
@@ -394,7 +314,7 @@ docker run --env-file .env -v $(pwd)/crypto_pipeline.db:/app/crypto_pipeline.db 
 ## 👤 Author & License
 
 **Harsha Naik**  
-- GitHub: [@HarshaNaik8](https://github.com/HarshaNaik8)  
-- LinkedIn: [Harsha Naik](https://www.linkedin.com/in/harsha-naik-664694292/)  
+- **GitHub:** [@HarshaNaik8](https://github.com/HarshaNaik8)  
+- **LinkedIn:** [Harsha Naik](https://www.linkedin.com/in/harsha-naik-664694292/)
 
 Licensed under the [MIT License](LICENSE).

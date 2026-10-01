@@ -95,29 +95,37 @@ def create_db_engine(connection_string: str = None):
     except ImportError:
         pass
 
+    # Helper to apply cloud-resilient pool settings
+    def _create_robust_engine(url: str, **kwargs):
+        # pool_pre_ping prevents OperationalError when Neon Serverless Postgres goes to sleep and kills connections
+        # pool_recycle prevents stale connections that have exceeded the cloud provider's TCP timeout
+        kwargs.setdefault("pool_pre_ping", True)
+        kwargs.setdefault("pool_recycle", 300)
+        return create_engine(url, **kwargs)
+
     # Helper for pg8000 URL rewrite
     def _to_pg8000(url: str):
         import ssl
         from urllib.parse import urlparse, urlunparse
         parsed = urlparse(url)
         cleaned = urlunparse(("postgresql+pg8000", parsed.netloc, parsed.path, parsed.params, "", parsed.fragment))
-        return create_engine(cleaned, connect_args={"ssl_context": ssl.create_default_context()})
+        return _create_robust_engine(cleaned, connect_args={"ssl_context": ssl.create_default_context()})
 
     # If URL requests psycopg 3 specifically
     if "postgresql+psycopg://" in conn_str:
         if has_psycopg3:
-            return create_engine(conn_str)
+            return _create_robust_engine(conn_str)
         elif has_psycopg2:
-            return create_engine(conn_str.replace("postgresql+psycopg://", "postgresql+psycopg2://"))
+            return _create_robust_engine(conn_str.replace("postgresql+psycopg://", "postgresql+psycopg2://"))
         elif has_pg8000:
             return _to_pg8000(conn_str)
 
     # If URL requests psycopg 2 specifically
     if "postgresql+psycopg2://" in conn_str:
         if has_psycopg2:
-            return create_engine(conn_str)
+            return _create_robust_engine(conn_str)
         elif has_psycopg3:
-            return create_engine(conn_str.replace("postgresql+psycopg2://", "postgresql+psycopg://"))
+            return _create_robust_engine(conn_str.replace("postgresql+psycopg2://", "postgresql+psycopg://"))
         elif has_pg8000:
             return _to_pg8000(conn_str)
 
@@ -125,12 +133,12 @@ def create_db_engine(connection_string: str = None):
     if conn_str.startswith("postgresql://") or conn_str.startswith("postgres://"):
         if has_psycopg3:
             target = conn_str.replace("postgresql://", "postgresql+psycopg://", 1).replace("postgres://", "postgresql+psycopg://", 1)
-            return create_engine(target)
+            return _create_robust_engine(target)
         elif has_psycopg2:
             target = conn_str.replace("postgresql://", "postgresql+psycopg2://", 1).replace("postgres://", "postgresql+psycopg2://", 1)
-            return create_engine(target)
+            return _create_robust_engine(target)
         elif has_pg8000:
             return _to_pg8000(conn_str)
 
-    return create_engine(conn_str)
+    return _create_robust_engine(conn_str)
 

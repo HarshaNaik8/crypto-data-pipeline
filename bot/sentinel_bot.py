@@ -84,8 +84,13 @@ def create_db_engine(connection_url: str):
     Supports SQLite, PostgreSQL with psycopg2, and PostgreSQL with pg8000.
     Automatically handles SSL contexts and strips incompatible driver arguments (like ?sslmode=require).
     """
+    def _robust_engine(url, **kwargs):
+        kwargs.setdefault("pool_pre_ping", True)
+        kwargs.setdefault("pool_recycle", 300)
+        return create_engine(url, **kwargs)
+
     if not connection_url or "postgresql" not in connection_url:
-        return create_engine(connection_url)
+        return _robust_engine(connection_url)
 
     is_pg8000 = False
     try:
@@ -108,9 +113,9 @@ def create_db_engine(connection_url: str):
             parsed.fragment
         ))
         ssl_ctx = ssl.create_default_context()
-        return create_engine(cleaned_url, connect_args={"ssl_context": ssl_ctx})
+        return _robust_engine(cleaned_url, connect_args={"ssl_context": ssl_ctx})
     else:
-        return create_engine(connection_url)
+        return _robust_engine(connection_url)
 
 # Database engine: automatically connects to Neon Cloud Postgres if configured, else SQLite
 DB_CONNECTION_STRING = os.getenv("NEON_DB_URL") or os.getenv("DB_CONNECTION_STRING", f"sqlite:///{DB_PATH}")
@@ -499,9 +504,10 @@ async def cmd_health(interaction: discord.Interaction):
 
     # Check 1: Database accessible
     try:
-        rows = query_db("SELECT COUNT(*) as cnt FROM fact_market_data")
+        with bot_engine.connect() as conn:
+            cnt = conn.execute(text("SELECT COUNT(*) FROM fact_market_data")).scalar() or 0
         db_type = "Neon PostgreSQL (Cloud)" if is_postgres else "SQLite (Local)"
-        checks.append(("💾 Database", "✅ Online", f"{db_type} — {rows[0]['cnt']} records"))
+        checks.append(("💾 Database", "✅ Online", f"{db_type} — {cnt} records"))
     except Exception as e:
         checks.append(("💾 Database", "❌ Offline", str(e)[:100]))
 

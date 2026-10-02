@@ -193,14 +193,16 @@ class DataTransformer:
         # Step 0: Capture which dates are "new" (from current extraction)
         current_df = self.raw_df.copy()
         current_df["timestamp"] = pd.to_datetime(current_df["timestamp"])
-        current_dates = set(current_df["timestamp"].dt.date.unique())
+        current_df["is_new_extraction"] = True
 
         # Step 1: Load historical context
         hist_df = self._load_historical_data()
 
         # Step 2: Combine for rolling calculations
         if not hist_df.empty:
+            hist_df["is_new_extraction"] = False
             combined = pd.concat([hist_df, current_df], ignore_index=True)
+            # Remove any exact historical duplicate timestamps just in case
             combined = combined.drop_duplicates(subset=["symbol", "timestamp"], keep="last")
         else:
             combined = current_df.copy()
@@ -221,7 +223,7 @@ class DataTransformer:
             "timestamp", "symbol", "symbol_id", "price_usd",
             "market_cap", "volume_24h", "change_24h",
             "rolling_avg_7d", "rolling_avg_30d",
-            "daily_return", "volatility_7d",
+            "daily_return", "volatility_7d", "is_new_extraction"
         ]
         for col in final_columns:
             if col not in enriched.columns:
@@ -230,7 +232,9 @@ class DataTransformer:
         enriched = enriched[final_columns].copy()
 
         # Step 7: Keep only the NEW rows for loading into DB
-        new_rows = enriched[enriched["timestamp"].dt.date.isin(current_dates)].copy()
+        new_rows = enriched[enriched["is_new_extraction"] == True].copy()
+        new_rows = new_rows.drop(columns=["is_new_extraction"])
+        enriched = enriched.drop(columns=["is_new_extraction"])
 
         logger.info("=" * 60)
         logger.info("TRANSFORMATION COMPLETE")

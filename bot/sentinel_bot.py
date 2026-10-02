@@ -296,11 +296,92 @@ async def cmd_test(interaction: discord.Interaction):
         test_dir = Path("tests")
 
     if not test_dir.exists():
+        # Live cloud-native integration test suite
+        start = time.time()
+        test_results = []
+        import requests
+
+        # 1. Neon DB Connection Handshake
+        t0 = time.time()
+        try:
+            with bot_engine.connect() as conn:
+                conn.execute(text("SELECT 1")).scalar()
+            test_results.append(("💾 Neon DB Handshake", "✅ PASS", f"{(time.time()-t0)*1000:.0f}ms"))
+        except Exception as e:
+            test_results.append(("💾 Neon DB Handshake", "❌ FAIL", str(e)[:35]))
+
+        # 2. Dim Table Schema & Dimensions Integrity
+        t0 = time.time()
+        try:
+            with bot_engine.connect() as conn:
+                dim_cnt = conn.execute(text("SELECT COUNT(*) FROM dim_symbol")).scalar() or 0
+            res = "✅ PASS" if dim_cnt >= 3 else "⚠️ WARN"
+            test_results.append(("📊 Dim Symbols (3)", res, f"{dim_cnt} active ({(time.time()-t0)*1000:.0f}ms)"))
+        except Exception as e:
+            test_results.append(("📊 Dim Symbols (3)", "❌ FAIL", str(e)[:35]))
+
+        # 3. Fact Table Data Integrity
+        t0 = time.time()
+        try:
+            with bot_engine.connect() as conn:
+                fact_cnt = conn.execute(text("SELECT COUNT(*) FROM fact_market_data")).scalar() or 0
+            test_results.append(("📈 Fact Records", "✅ PASS", f"{fact_cnt} rows ({(time.time()-t0)*1000:.0f}ms)"))
+        except Exception as e:
+            test_results.append(("📈 Fact Records", "❌ FAIL", str(e)[:35]))
+
+        # 4. Primary CoinGecko API Health
+        t0 = time.time()
+        try:
+            r = requests.get("https://api.coingecko.com/api/v3/ping", timeout=4)
+            res = "✅ PASS" if r.status_code == 200 else f"⚠️ HTTP {r.status_code}"
+            test_results.append(("🦎 CoinGecko Ping", res, f"{(time.time()-t0)*1000:.0f}ms"))
+        except Exception as e:
+            test_results.append(("🦎 CoinGecko Ping", "⚠️ TIMEOUT", str(e)[:35]))
+
+        # 5. Secondary CoinPaprika API Health
+        t0 = time.time()
+        try:
+            r = requests.get("https://api.coinpaprika.com/v1/ping", timeout=4)
+            res = "✅ PASS" if r.status_code == 200 else f"⚠️ HTTP {r.status_code}"
+            test_results.append(("🌶️ CoinPaprika Ping", res, f"{(time.time()-t0)*1000:.0f}ms"))
+        except Exception as e:
+            test_results.append(("🌶️ CoinPaprika Ping", "⚠️ TIMEOUT", str(e)[:35]))
+
+        # 6. Tertiary Binance API Health
+        t0 = time.time()
+        try:
+            r = requests.get("https://api.binance.com/api/v3/ping", timeout=4)
+            res = "✅ PASS" if r.status_code == 200 else f"⚠️ HTTP {r.status_code}"
+            test_results.append(("🔶 Binance Ping", res, f"{(time.time()-t0)*1000:.0f}ms"))
+        except Exception as e:
+            test_results.append(("🔶 Binance Ping", "⚠️ TIMEOUT", str(e)[:35]))
+
+        total_duration = time.time() - start
+        all_passed = all("PASS" in status for _, status, _ in test_results[:3])
+
         embed = discord.Embed(
-            title="🧪 CI/CD Test Suite Notice",
-            description="The full test suite (25/25 tests) runs automatically on **GitHub Actions CI/CD** on every git push.",
-            color=COLOR_INFO,
+            title="🧪 Live Sentinel Integration Test Suite" + (" — ALL PASS ✅" if all_passed else " — WARNINGS ⚠️"),
+            description=(
+                f"Executed **{len(test_results)} live subsystem tests** in **{total_duration:.2f}s**.\n"
+                f"Direct cloud telemetry benchmark across Neon DB, Data Marts, and API Endpoints."
+            ),
+            color=COLOR_SUCCESS if all_passed else COLOR_FAILURE,
+            timestamp=datetime.now(timezone.utc),
         )
+
+        for name, status, detail in test_results:
+            embed.add_field(name=f"{name}: {status}", value=f"`{detail}`", inline=True)
+
+        embed.add_field(
+            name="🚀 Full 25-Test Pytest Suite (Unit / Integration / Math)",
+            value=(
+                "The mathematical unit test suite runs in CI/CD on GitHub Actions.\n"
+                "👉 **[Run Full 25-Test Pytest Suite on GitHub Actions](https://github.com/HarshaNaik8/crypto-data-pipeline/actions/workflows/ci.yml)**\n"
+                "*Click the link ➔ click **Run workflow** ➔ select branch `main`!*"
+            ),
+            inline=False,
+        )
+        embed.set_footer(text="Crypto Pipeline Sentinel • Enterprise Automated Testing")
         await interaction.followup.send(embed=embed)
         return
 
@@ -745,16 +826,26 @@ async def cmd_resources(interaction: discord.Interaction):
     )
     embed.add_field(
         name="🤖 4. Bot-Hosting.net (24/7 Bot Container)",
-        value="[Bot-Hosting Server Console](https://bot-hosting.net/panel/)\n*Active 24/7/365 • Turn bot ON/OFF or view real-time container CPU/RAM metrics*",
+        value="[Bot-Hosting Server Console](https://bot-hosting.net/a)\n*Active 24/7/365 • Turn bot ON/OFF or view real-time container CPU/RAM metrics*",
         inline=False,
     )
     embed.add_field(
-        name="🪙 5. CoinGecko REST API",
-        value="[CoinGecko API Health Endpoint](https://api.coingecko.com/api/v3/ping)\n*Live market prices, 24h volumes, market capitalization*",
+        name="🦎 5. CoinGecko REST API (Primary Aggregator)",
+        value="[CoinGecko API Health Endpoint](https://api.coingecko.com/api/v3/ping)\n*Primary global VWAP benchmark • Live market prices, 24h volumes, market cap*",
         inline=False,
     )
     embed.add_field(
-        name="📊 6. Power BI Desktop / Cloud Reports",
+        name="🌶️ 6. CoinPaprika REST API (Secondary Aggregator Fallback)",
+        value="[CoinPaprika API Status Endpoint](https://api.coinpaprika.com/v1/ping)\n*Secondary global aggregator fallback • Zero rate-limiting, instant cloud failover*",
+        inline=False,
+    )
+    embed.add_field(
+        name="🔶 7. Binance Public REST API (Tertiary Exchange Fallback)",
+        value="[Binance API Status Endpoint](https://api.binance.com/api/v3/ping)\n*Tertiary exchange fallback • Real-time order book price feeds*",
+        inline=False,
+    )
+    embed.add_field(
+        name="📊 8. Power BI Desktop / Cloud Reports",
         value="*Connected directly to Neon PostgreSQL (Serverless Cloud Import)*\n*Visualizes financial metrics, rolling averages, and volatility trends*",
         inline=False,
     )

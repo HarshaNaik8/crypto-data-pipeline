@@ -25,47 +25,43 @@ flowchart TD
         CG --> EXT[src/extract.py]
         CP --> EXT
         BN --> EXT
-        EXT --> RAW[(data/raw/raw_YYYYMMDD_HHMM.json)]
+        EXT --> RAW["data/raw/raw_YYYYMMDD_HHMM.json"]
     end
 
     subgraph Transformation ["2. Financial Feature Engineering (Transform)"]
         EXT --> TRF[src/transform.py]
-        DB_HIST[(Historical Market Data)] -.->|Load Past Context| TRF
-        TRF -->|Calculate Rolling 7d/30d Avg, Daily Return, Volatility| ENR[Enriched Feature Set]
-        ENR --> PRQ[(data/transformed/*.parquet)]
+        DB_HIST["Historical Market Data"] -.->|Load Past Context| TRF
+        TRF -->|"Calculate Rolling 7d/30d Avg, Daily Return, Volatility"| ENR[Enriched Feature Set]
+        ENR --> PRQ["data/transformed/*.parquet"]
         ENR --> LOAD_READY[Clean Current-Day Delta]
     end
 
     subgraph Storage ["3. Cloud Data Warehouse (Load)"]
         LOAD_READY --> LOAD[src/load.py]
-        LOAD -->|"Dynamic Dim Key Lookup"| DIM[(dim_symbol)]
-        LOAD -->|"True In-Place UPSERT<br/>ON CONFLICT DO UPDATE"| FACT[(fact_market_data)]
-        FACT -->|"Dialect-Aware DDL View"| VIEW[(vw_weekly_trends)]
-        DB_TARGET{{"Storage Target"}}
-        LOAD --> DB_TARGET
-        DB_TARGET -->|"Cloud Primary"| NEON[("Neon Serverless PostgreSQL<br/>(AWS Singapore)")]
-        DB_TARGET -->|"Local Fallback"| SQLITE[("Local SQLite3 Engine<br/>crypto_pipeline.db")]
+        LOAD -->|"Dynamic Dim Key Lookup"| DIM["dim_symbol"]
+        LOAD -->|"True In-Place UPSERT<br/>ON CONFLICT DO UPDATE"| FACT["fact_market_data"]
+        FACT -->|"Dialect-Aware DDL View"| VIEW["vw_weekly_trends"]
+        LOAD --> NEON["Neon Serverless PostgreSQL<br/>(AWS Singapore)"]
     end
 
     subgraph Orchestration ["4. Autonomous Cloud Orchestration"]
         CRON["GitHub Actions Cron<br/>00:05 UTC (05:35 AM IST)"] --> GHA[daily_etl.yml Runner]
         GHA --> RUN_ETL[run_etl.py]
         RUN_ETL --> PIPE[pipeline.py]
-        LOCAL_TASK["Windows Task Scheduler<br/>(Optional Local Runner)"] -.-> RUN_ETL
     end
 
     subgraph Observability ["5. 24/7 Cloud Sentinel Bot & Alerting"]
-        PIPE -->|Webhook Heartbeat / Incident Alert| HOOK[Discord Channel #general]
+        PIPE -->|Webhook Heartbeat / Incident Alert| HOOK[Discord Channel]
         BOT_HOST["bot-hosting.net<br/>Isolated Linux Container"] --> BOT[bot/sentinel_bot.py]
-        BOT -->|11 Slash Commands| DISCORD[Discord App / Server]
-        DISCORD -->|/health, /cloud_db, /verify_etl, /run, /resources| BOT
-        BOT -.->|"pg8000 + SSL"| NEON
+        BOT -->|"11 Slash Commands"| DISCORD[Discord App / Server]
+        DISCORD -->|"/health, /market, /cloud_db, /verify_etl, /resources"| BOT
+        BOT -.->|"pg8000 + SSL + pool_pre_ping"| NEON
     end
 
     subgraph BI ["6. Interactive Business Intelligence"]
-        FACT -.->|"Direct DB Connection / ODBC DSN"| PBI["Power BI Desktop / Dashboard"]
-        DIM -.->|"Star Schema (1:N Single Direction)"| PBI
-        VIEW -.->|"Aggregated Trends & Visuals"| PBI
+        FACT -.->|"Direct DB Import Connection"| PBI["Power BI Desktop"]
+        DIM -.->|"Star Schema (1:N)"| PBI
+        VIEW -.->|"Aggregated Trends"| PBI
     end
 ```
 
@@ -93,7 +89,7 @@ In institutional quantitative finance, decision-makers rely on continuous time-s
 
 ## 🗄️ 3. Star-Schema Dimensional Modeling
 
-The warehouse uses a dimensional star schema optimized for analytical query performance, strict referential integrity, and seamless reporting across PostgreSQL and SQLite:
+The warehouse uses a dimensional star schema optimized for analytical query performance, strict referential integrity, and seamless BI reporting:
 
 ```
            ┌────────────────────────────┐
@@ -120,10 +116,11 @@ The warehouse uses a dimensional star schema optimized for analytical query perf
            │ volatility_7d (DOUBLE PREC)│
            │ record_timestamp (VARCHAR) │
            ├────────────────────────────┤
-           │ UNIQUE(symbol_id, timestamp│
+           │ UNIQUE(symbol_id,          │
+           │        record_timestamp)   │
            └────────────────────────────┘
                           │
-                          ▼ (Analytical Materialized View)
+                          ▼ (Analytical View)
            ┌────────────────────────────┐
            │      vw_weekly_trends      │
            ├────────────────────────────┤
@@ -138,7 +135,7 @@ The warehouse uses a dimensional star schema optimized for analytical query perf
 
 ### In-Place Idempotent UPSERT (`ON CONFLICT DO UPDATE`)
 
-To prevent duplicate entries and avoid auto-increment primary key jumps caused by `DELETE + INSERT` semantics, the pipeline executes a **True In-Place UPSERT**:
+To prevent duplicate entries on re-runs, the pipeline executes a **True In-Place UPSERT**:
 
 ```sql
 INSERT INTO fact_market_data (
@@ -162,12 +159,11 @@ DO UPDATE SET
 ## 🌐 4. Cloud Infrastructure & Multi-Driver Database Engine
 
 ### Universal Database Engine (`create_db_engine`)
-The pipeline runs seamlessly across local developer workstations, GitHub Actions runners, and containerized Linux environments through an intelligent auto-negotiation engine in `src/utils.py`:
+The pipeline runs seamlessly across GitHub Actions runners and containerized Linux environments through an intelligent auto-negotiation engine in `src/utils.py`:
 
-- **Psycopg 3 (`psycopg[binary]`)**: Modern official driver for Python 3.11–3.14+ with C binary extensions.
-- **Psycopg 2 (`psycopg2-binary`)**: Legacy production adapter.
-- **pg8000 (`pg8000`)**: Pure-Python PostgreSQL driver with custom SSL context (used on lightweight container hosts where C compilers are unavailable).
-- **SQLite3**: Fully embedded offline database engine.
+- **Psycopg 3 (`psycopg[binary]`)**: Modern official driver for Python 3.11–3.14+ with C binary extensions. Used on GitHub Actions.
+- **pg8000 (`pg8000`)**: Pure-Python PostgreSQL driver with custom SSL context. Used on bot-hosting.net containers where C compilers are unavailable.
+- **Connection Resilience**: All engines are created with `pool_pre_ping=True` and `pool_recycle=300` to survive Neon Serverless sleep cycles.
 
 ```python
 from src.utils import create_db_engine
@@ -179,31 +175,32 @@ engine = create_db_engine(os.getenv("NEON_DB_URL"))
 
 ## 🤖 5. 24/7 Discord Sentinel Bot (`bot/sentinel_bot.py`)
 
-Hosted 24/7 on an isolated Linux cloud container (`bot-hosting.net`), the Sentinel Bot acts as a dedicated Command & Control Center for data pipeline observability.
+Hosted 24/7 on an isolated Linux cloud container ([bot-hosting.net](https://bot-hosting.net/a)), the Sentinel Bot acts as a dedicated Command & Control Center for data pipeline observability. It connects to Neon PostgreSQL via `pg8000` with SSL and resilient connection pooling.
 
 ### Complete Slash Commands Suite (11 Commands)
 
 | Command | Category | Description |
 |---|---|---|
-| `/health` | **Diagnostics** | Real-time full-stack health report (Neon DB status, Python 3.14 runtime, API reachability, container telemetry). |
-| `/cloud_db` | **Database** | Live Neon PostgreSQL connection telemetry, round-trip latency (ms), storage usage, and row counts. |
-| `/verify_etl` | **Audit** | Verifies if today's ETL execution successfully populated records in Neon PostgreSQL. |
-| `/resources` | **Navigation** | Centralized project directory linking to Neon Console, GitHub Actions, Discord Server, and APIs. |
-| `/run` | **Execution** | Dispatches an immediate remote execution of the GitHub Actions Cloud ETL workflow via GitHub REST API. |
-| `/status` | **Monitoring** | Pipeline health, latest batch execution timestamps, and failure incident telemetry. |
-| `/refresh_views` | **Analytics** | Re-computes and refreshes the analytical view `vw_weekly_trends` across all historical data. |
-| `/pipeline_summary` | **Statistics** | High-level summary of all tracked symbols, aggregate row counts, and date ranges. |
-| `/export_parquet` | **Backup** | Exports fact tables into compressed Apache Parquet audit archives. |
-| `/test` | **Quality** | Runs local unit test verification suite guidelines and diagnostic tests. |
-| `/help` | **Manual** | Interactive documentation guide explaining all commands and architecture details. |
+| `/status` | **Monitoring** | Pipeline health overview — date range, total rows, unique days, DB size. |
+| `/market` | **Market Data** | Latest market snapshot — prices, 24h change, volume, market cap, 7d avg, volatility, daily return for all tracked assets. |
+| `/health` | **Diagnostics** | Full-stack system health check — Neon DB status, Python runtime, environment secrets, CoinGecko API, webhook, and infrastructure telemetry. |
+| `/cloud_db` | **Database** | Live Neon PostgreSQL deep-dive — connection latency (ms), active connections, storage size, table row counts, and engine version. |
+| `/dbstats` | **Database** | Detailed per-table and per-symbol statistics — `dim_symbol` listing, `fact_market_data` row counts with date ranges per asset, and `vw_weekly_trends` aggregates. |
+| `/history` | **Analytics** | Historical price & volatility trend for a chosen asset (BTC/ETH/SOL) — last 7 recorded days with daily return and 7d volatility. |
+| `/verify_etl` | **Audit** | Verifies if today's scheduled ETL execution has completed and shows the prices loaded for each symbol. |
+| `/test` | **Quality** | Runs a live 6-point integration smoke test (DB handshake, dimension integrity, fact integrity, CoinGecko/CoinPaprika/Binance API pings) with millisecond latencies. Includes a direct link to trigger the full 25-test Pytest suite on GitHub Actions. |
+| `/run` | **Execution** | Triggers the ETL pipeline — dispatches GitHub Actions via REST API (if `GITHUB_TOKEN` is set), runs locally, or provides a 1-click manual trigger link. |
+| `/resources` | **Navigation** | Centralized architecture hub — direct links to GitHub repo, GitHub Actions, Neon Console, Bot-Hosting panel, CoinGecko API, CoinPaprika API, Binance API, and Power BI. |
+| `/help_pipe` | **Manual** | Interactive command reference listing all 11 slash commands with descriptions. |
 
 ---
 
 ## ⏰ 6. Cloud Automation & Scheduling
 
 The cloud pipeline is configured to execute daily at **00:05 UTC (05:35 AM IST)** via GitHub Actions:
-- **Optimal Crypto Market Timing:** Global cryptocurrency daily bars close at **00:00 UTC**. Running at 00:05 UTC ensures the final daily closing prices, daily returns, and trading volumes are 100% captured without missing volatility.
+- **Optimal Crypto Market Timing:** Global cryptocurrency daily bars close at **00:00 UTC**. Running at 00:05 UTC ensures the final daily closing prices, daily returns, and trading volumes are 100% captured.
 - **Zero Laptop Dependency:** Completely automated in the cloud without requiring a local machine to be turned on.
+- **Bot-Hosting Renewal Reminder:** A separate GitHub Actions workflow (`bot_renewal_reminder.yml`) sends a Discord notification every 3 days reminding you to renew the free bot-hosting.net plan.
 
 ```yaml
 # .github/workflows/daily_etl.yml
@@ -218,45 +215,53 @@ on:
 
 ## 📊 7. Power BI Business Intelligence & Reporting
 
-The warehouse is connected directly to **Microsoft Power BI Desktop** (`crypto_dash.pbix`) for executive reporting.
+The warehouse is connected directly to **Microsoft Power BI Desktop** (`crypto_dash.pbix`) via Import mode from Neon PostgreSQL.
 
 ### Model View (Star Schema)
-- `dim_symbol[symbol_id]` $\xrightarrow{1:N}$ `fact_market_data[symbol_id]`
-  - **Cardinality:** 1 to Many (`1:*`)
+- `dim_symbol[symbol_id]` → `fact_market_data[symbol_id]`
+  - **Cardinality:** 1 to Many (1:*)
   - **Cross filter direction:** Single (`dim_symbol` filters `fact_market_data`)
 - `vw_weekly_trends`: Standalone aggregated analytical view.
 
+### Column Formatting
+| Column | Format | Decimals |
+|--------|--------|----------|
+| `price_usd` | Currency ($) | 2 |
+| `volume_24h` | Currency ($) | 0 |
+| `market_cap` | Currency ($) | 0 |
+| `rolling_avg_7d` | Currency ($) | 2 |
+| `rolling_avg_30d` | Currency ($) | 2 |
+| `change_24h` | Percentage (%) | 2 |
+| `daily_return` | Percentage (%) | 2 |
+| `volatility_7d` | Percentage (%) | 2 |
+| `record_timestamp` | Date | Short Date |
+
 ### Recommended Visualizations
-1. **Executive KPI Cards**:
-   - `Latest Price`: `SELECTEDVALUE(fact_market_data[price_usd])` formatted as `$#,##0.00`
-   - `24h Return`: `SELECTEDVALUE(fact_market_data[change_24h])` with dynamic conditional color formatting (Green for $\ge 0$, Red for $< 0$)
-   - `7d Volatility`: `SELECTEDVALUE(fact_market_data[volatility_7d])` formatted as `0.00%`
-2. **Asset Slicer**:
-   - Tile or pill slicer for `dim_symbol[symbol_code]` (BTC, ETH, SOL).
-3. **Price & Rolling Averages Line Chart**:
-   - **X-Axis:** `record_timestamp`
-   - **Y-Axis:** `price_usd`, `rolling_avg_7d`, `rolling_avg_30d`
-4. **Weekly Market Overview Table**:
-   - Aggregated metrics from `vw_weekly_trends`: `year_week`, `avg_price`, `avg_volume`, `price_range`, `record_count`.
+1. **Executive KPI Cards**: Latest Price, 24h Return (conditional color), 7d Volatility.
+2. **Asset Slicer**: Tile or pill slicer for `dim_symbol[symbol_code]` (BTC, ETH, SOL).
+3. **Price & Rolling Averages Line Chart**: X-Axis: `record_timestamp`, Y-Axis: `price_usd`, `rolling_avg_7d`, `rolling_avg_30d`.
+4. **Weekly Market Overview Table**: Aggregated metrics from `vw_weekly_trends`.
 
 ---
 
 ## 🧪 8. Automated Testing Suite (25 Tests Passing)
 
-All modules are strictly tested with automated mock fixtures covering API rate limiting (HTTP 429), exponential jitter backoffs, server error retries (500/503), schema integrity, and Discord alert payloads:
+All core modules are tested with automated mock fixtures covering API rate limiting (HTTP 429), exponential jitter backoffs, server error retries (500/503), schema integrity, and Discord alert payloads:
 
 ```bash
 $ pytest tests/ -v
 ============================= test session starts =============================
-platform win32 -- Python 3.11.9, pytest-7.4.0, pluggy-1.6.0
+platform linux -- Python 3.11, pytest-7.4.0
 collected 25 items
 
 tests/test_alerts.py .....                                               [ 20%]
 tests/test_extract.py ..........                                         [ 60%]
 tests/test_transform.py ..........                                       [100%]
 
-============================= 25 passed in 3.37s ==============================
+============================= 25 passed ==============================
 ```
+
+Tests run automatically on every `git push` to `main` via the CI workflow (`.github/workflows/ci.yml`).
 
 ---
 
@@ -265,7 +270,7 @@ tests/test_transform.py ..........                                       [100%]
 ### Prerequisites
 - Python 3.11+
 - Git
-- Neon PostgreSQL Account (or local SQLite)
+- Neon PostgreSQL Account (free tier at [neon.tech](https://neon.tech))
 
 ### 1. Clone & Setup Virtual Environment
 ```bash
@@ -304,9 +309,50 @@ DISCORD_BOT_TOKEN=your-bot-token
 python run_etl.py
 ```
 
-### 5. Launch Discord Sentinel Bot Locally (or via bot-hosting.net)
+### 5. Launch Discord Sentinel Bot
 ```bash
 python bot/sentinel_bot.py
+```
+
+---
+
+## 📁 10. Project Structure
+
+```
+crypto-data-pipeline/
+├── .github/workflows/
+│   ├── ci.yml                    # CI: 25-test pytest suite on every push
+│   ├── daily_etl.yml             # Daily ETL cron (00:05 UTC)
+│   └── bot_renewal_reminder.yml  # 3-day Discord reminder for bot-hosting renewal
+├── bot/
+│   ├── __init__.py
+│   └── sentinel_bot.py           # 24/7 Discord bot (11 slash commands)
+├── src/
+│   ├── __init__.py
+│   ├── extract.py                # 3-tier API extractor (CoinGecko → CoinPaprika → Binance)
+│   ├── transform.py              # Feature engineering (rolling avg, volatility, daily return)
+│   ├── load.py                   # Star-schema loader with UPSERT
+│   ├── alerts.py                 # Discord webhook success/failure notifications
+│   ├── utils.py                  # Universal DB engine, logging setup
+│   └── weekly_aggregate.py       # vw_weekly_trends view refresh
+├── tests/
+│   ├── test_alerts.py            # Alert payload tests
+│   ├── test_extract.py           # API extraction & retry tests
+│   └── test_transform.py         # Feature engineering & schema tests
+├── scripts/
+│   ├── backfill_market_data.py   # Historical data backfill utility
+│   ├── migrate_sqlite_to_postgres.py  # SQLite → Neon migration
+│   └── migrate_add_unique_constraint.py  # Schema migration
+├── data/
+│   ├── raw/                      # Raw JSON audit trail (timestamped)
+│   └── transformed/              # Parquet backups (timestamped)
+├── pipeline.py                   # Core ETL orchestrator
+├── run_etl.py                    # Entry point for scheduled execution
+├── crypto_dash.pbix              # Power BI dashboard file
+├── requirements.txt              # Python dependencies
+├── .env.example                  # Environment variable template
+├── LICENSE                       # MIT License
+└── README.md                     # This file
 ```
 
 ---

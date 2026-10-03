@@ -36,5 +36,8 @@ logs/
 Thumbs.db
 desktop.ini
 
+# ── Pytest cache ─────────────────────────────────────────────────────────────
+.pytest_cache/
+
 # ── Power BI (large binary — keep if you want to share the dashboard) ─────────
 # crypto_dash.pbix

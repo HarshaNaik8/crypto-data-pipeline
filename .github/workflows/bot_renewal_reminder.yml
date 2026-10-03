@@ -1,0 +1,28 @@
+name: Bot-Hosting Renewal Reminder
+
+on:
+  schedule:
+    # Runs every 3 days at 09:00 UTC (14:30 IST) — well before the 4-day expiry
+    - cron: '0 9 */3 * *'
+  workflow_dispatch:  # Manual trigger for testing
+
+jobs:
+  remind:
+    name: Send Discord Renewal Reminder
+    runs-on: ubuntu-latest
+    steps:
+      - name: Send Reminder to Discord
+        env:
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+        run: |
+          curl -H "Content-Type: application/json" \
+               -d '{
+                 "embeds": [{
+                   "title": "🔔 Bot-Hosting.net Renewal Reminder",
+                   "description": "Your **free server plan** on bot-hosting.net needs manual renewal every 4 days to keep the Sentinel Bot alive 24/7.\n\n👉 **[Click here to renew now](https://bot-hosting.net/a)**\n\n1. Log in to bot-hosting.net\n2. Click **Renew now** on the yellow banner\n3. Done! Your bot stays online for another 4 days.",
+                   "color": 15844367,
+                   "footer": {"text": "Crypto Pipeline • Automated Renewal Reminder"},
+                   "timestamp": "'$(date -u +%Y-%m-%dT%H:%M:%SZ)'"
+                 }]
+               }' \
+               "$DISCORD_WEBHOOK_URL"

@@ -113,6 +113,7 @@ class CoinGeckoExtractor:
                             "volume_24h": float(quotes.get("volume_24h", 0.0)),
                             "change_24h": float(quotes.get("percent_change_24h", 0.0)),
                             "timestamp": now_ts,
+                            "data_source": "coinpaprika",
                         })
                         logger.info("Successfully fetched %s from CoinPaprika: $%s", sym.upper(), price)
             except Exception as exc:
@@ -148,6 +149,7 @@ class CoinGeckoExtractor:
                             "volume_24h": vol,
                             "change_24h": change,
                             "timestamp": now_ts,
+                            "data_source": "binance",
                         })
                         logger.info("Successfully fetched %s from Binance fallback: $%s", sym_upper, price)
             except Exception as e:
@@ -183,6 +185,7 @@ class CoinGeckoExtractor:
                         "volume_24h": raw.get("usd_24h_vol"),
                         "change_24h": raw.get("usd_24h_change"),
                         "timestamp": now_ts,
+                        "data_source": "coingecko",
                     })
                     logger.info("Successfully fetched %s from CoinGecko", sym)
 

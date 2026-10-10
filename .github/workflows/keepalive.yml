@@ -1,0 +1,22 @@
+name: Keepalive Workflow
+
+on:
+  schedule:
+    # Runs every 25 days to prevent GitHub from disabling scheduled cron jobs after 60 days of inactivity
+    - cron: '0 0 1,25 * *'
+  workflow_dispatch:
+
+jobs:
+  keepalive:
+    name: Prevent GitHub Actions 60-Day Inactivity Disable
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Keepalive Automated Ping
+        uses: gautamkrishnar/keepalive-workflow@v2
+        with:
+          committer_username: "github-actions[bot]"
+          committer_email: "github-actions[bot]@users.noreply.github.com"
+          commit_message: "chore(ci): keepalive heartbeat to maintain scheduled cron workflows"

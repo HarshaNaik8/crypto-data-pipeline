@@ -223,11 +223,11 @@ class DataTransformer:
             "timestamp", "symbol", "symbol_id", "price_usd",
             "market_cap", "volume_24h", "change_24h",
             "rolling_avg_7d", "rolling_avg_30d",
-            "daily_return", "volatility_7d", "is_new_extraction"
+            "daily_return", "volatility_7d", "data_source", "is_new_extraction"
         ]
         for col in final_columns:
             if col not in enriched.columns:
-                enriched[col] = None
+                enriched[col] = "coingecko" if col == "data_source" else None
 
         enriched = enriched[final_columns].copy()
 

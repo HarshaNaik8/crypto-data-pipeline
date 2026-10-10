@@ -63,6 +63,7 @@ class DatabaseLoader:
                         daily_return    DOUBLE PRECISION,
                         volatility_7d   DOUBLE PRECISION,
                         record_timestamp VARCHAR(20) NOT NULL,
+                        data_source     VARCHAR(20) DEFAULT 'coingecko',
                         CONSTRAINT uix_symbol_date UNIQUE (symbol_id, record_timestamp)
                     );
                 """))
@@ -91,6 +92,7 @@ class DatabaseLoader:
                         daily_return    REAL,
                         volatility_7d   REAL,
                         record_timestamp TEXT NOT NULL,
+                        data_source     TEXT DEFAULT 'coingecko',
                         UNIQUE (symbol_id, record_timestamp),
                         FOREIGN KEY (symbol_id) REFERENCES dim_symbol(symbol_id)
                     );
@@ -181,11 +183,11 @@ class DatabaseLoader:
             INSERT INTO fact_market_data (
                 symbol_id, price_usd, market_cap, volume_24h, change_24h,
                 rolling_avg_7d, rolling_avg_30d, daily_return, volatility_7d,
-                record_timestamp
+                record_timestamp, data_source
             ) VALUES (
                 :symbol_id, :price_usd, :market_cap, :volume_24h, :change_24h,
                 :rolling_avg_7d, :rolling_avg_30d, :daily_return, :volatility_7d,
-                :record_timestamp
+                :record_timestamp, :data_source
             )
             ON CONFLICT (symbol_id, record_timestamp) DO UPDATE SET
                 price_usd = EXCLUDED.price_usd,
@@ -195,7 +197,8 @@ class DatabaseLoader:
                 rolling_avg_7d = EXCLUDED.rolling_avg_7d,
                 rolling_avg_30d = EXCLUDED.rolling_avg_30d,
                 daily_return = EXCLUDED.daily_return,
-                volatility_7d = EXCLUDED.volatility_7d
+                volatility_7d = EXCLUDED.volatility_7d,
+                data_source = EXCLUDED.data_source
         """)
 
         with self.engine.begin() as conn:
@@ -214,6 +217,7 @@ class DatabaseLoader:
                         "daily_return": safe_float(row.get("daily_return"), default=0.0),
                         "volatility_7d": safe_float(row.get("volatility_7d"), default=0.0),
                         "record_timestamp": str(row["record_timestamp"]),
+                        "data_source": str(row.get("data_source") or "coingecko"),
                     },
                 )
                 rows_loaded += 1

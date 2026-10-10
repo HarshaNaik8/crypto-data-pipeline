@@ -21,7 +21,8 @@ def create_weekly_aggregate_view(connection_string=None):
 
     is_postgres = "postgresql" in conn_str
 
-    week_expr = "to_char(record_timestamp::date, 'YYYY-WW')" if is_postgres else "strftime('%Y-%W', record_timestamp)"
+    # ISO-8601 standard: IYYY-IW assigns weeks starting Monday, avoiding boundary splits
+    week_expr = "to_char(record_timestamp::date, 'IYYY-\"W\"IW')" if is_postgres else "strftime('%Y-W%W', record_timestamp)"
 
     view_sql = f"""
         CREATE VIEW vw_weekly_trends AS
